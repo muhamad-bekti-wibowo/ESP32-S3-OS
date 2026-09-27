@@ -1,5 +1,5 @@
 idf_component_register(
     SRCS "main.c"
     INCLUDE_DIRS "."
-    REQUIRES wifi_mgr web_ui logic_engine fbd_core esp_timer
+    REQUIRES wifi_mgr web_ui logic_engine fbd_core esp_timer app_update
 )

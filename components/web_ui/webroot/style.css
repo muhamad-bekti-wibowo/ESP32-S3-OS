@@ -435,7 +435,8 @@ h3 {
     padding: 0 8px;
 }
 
-#toolbar-network-link {
+#toolbar-network-link,
+#toolbar-ota-link {
     font-size: 12px;
     font-weight: 600;
     color: var(--text-muted);
@@ -443,7 +444,8 @@ h3 {
     padding: 0 4px;
 }
 
-#toolbar-network-link:hover {
+#toolbar-network-link:hover,
+#toolbar-ota-link:hover {
     color: var(--accent);
 }
 

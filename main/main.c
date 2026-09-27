@@ -2,6 +2,7 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_ota_ops.h"
 
 #include <string.h>
 
@@ -124,10 +125,30 @@ static void fbd_scan_task(void *pvParameters)
     }
 }
 
+/* Konfirmasi ke bootloader bahwa firmware yang baru saja diflash lewat
+ * OTA ini sehat (berhasil boot sampai sini tanpa crash) - kalau TIDAK
+ * dipanggil dan device reboot lagi tanpa konfirmasi ini (mis. crash
+ * loop), bootloader otomatis rollback ke firmware sebelumnya
+ * (CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE, lihat sdkconfig.defaults).
+ * Aman dipanggil juga untuk boot normal (bukan OTA) - jadi no-op kalau
+ * partisi sudah berstatus valid sebelumnya. */
+static void confirm_ota_boot_healthy(void)
+{
+    esp_ota_img_states_t state;
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    if (esp_ota_get_state_partition(running, &state) == ESP_OK &&
+        state == ESP_OTA_IMG_PENDING_VERIFY) {
+        esp_ota_mark_app_valid_cancel_rollback();
+        ESP_LOGI(TAG, "OTA: firmware baru dikonfirmasi sehat, rollback dibatalkan");
+    }
+}
+
 void app_main(void)
 {
     ESP_LOGI(TAG, "ESP32 Web Logic starting...");
     ESP_LOGI(TAG, "app_main jalan di core %d", xPortGetCoreID());
+
+    confirm_ota_boot_healthy();
 
     logic_engine_init(&s_legacy_program);
     build_default_graph(g_active_graph);

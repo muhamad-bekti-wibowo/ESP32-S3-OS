@@ -124,7 +124,50 @@ editor visual berbasis Drawflow yang di-hosting langsung dari ESP32-S3.
     json dimuat dari SPIFFS`, `GET /api/program` mengembalikan graph yang
     sama, bukan default).
 
+- **Selesai:** OTA (Over-The-Air firmware update) lewat web UI, di luar
+  roadmap aktif spec 01-07 tapi ditambahkan atas permintaan setelah
+  ditemukan flash fisik device sebenarnya **16MB** (bukan 8MB seperti
+  konfigurasi awal - separuh flash tidak terpakai, dikonfirmasi lewat
+  `esptool flash_id` di hardware nyata):
+  - `sdkconfig.defaults`: `CONFIG_ESPTOOLPY_FLASHSIZE_16MB`,
+    `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` (rollback otomatis).
+  - `partitions.csv`: dual app partition `ota_0`/`ota_1` (3MB masing-
+    masing) + `otadata` (8KB), SPIFFS diperbesar ke 4MB. Firmware
+    sekarang ~900KB - jauh di bawah 3MB, banyak ruang tumbuh.
+  - `main.c`: `confirm_ota_boot_healthy()` dipanggil di awal `app_main()`
+    - membatalkan rollback (`esp_ota_mark_app_valid_cancel_rollback()`)
+    kalau firmware berhasil boot sampai situ. Kalau TIDAK dipanggil
+    (mis. firmware baru crash sebelum sampai app_main) dan device
+    reboot lagi, bootloader otomatis rollback ke firmware lama sendiri
+    - device tidak bisa ter-brick permanen hanya karena upload firmware
+    yang salah/corrupt.
+  - `web_ui.c`: `POST /api/ota` terima body binary firmware `.bin`
+    langsung (bukan JSON), streaming ke `esp_ota_write()` (bukan
+    dibuffer penuh di RAM), tulis ke partisi OTA yang SEDANG TIDAK
+    AKTIF (`esp_ota_get_next_update_partition`), lalu `esp_ota_set_boot_
+    partition` dan `esp_restart()`. Partisi lama TIDAK disentuh sampai
+    firmware baru terbukti valid (`esp_ota_end` memvalidasi image).
+    `GET /api/ota/status` untuk cek partisi/versi/state firmware yang
+    sedang jalan.
+  - `ota.html` (tab System > Firmware): upload file `.bin` via
+    `<input type=file>` + `XMLHttpRequest` (progress bar upload).
+  - **Diverifikasi penuh di hardware nyata:** flash penuh dengan
+    partition table baru sukses (`SPI Flash Size: 16MB` terkonfirmasi
+    di boot log), config WiFi STA di NVS tetap tersambung otomatis
+    setelah flash (offset NVS tidak berubah). `GET /api/ota/status`
+    awal: partisi `ota_0`, state `valid`. Upload firmware yang sama
+    (915KB) lewat `POST /api/ota` sukses dalam ~17 detik, device reboot
+    otomatis, `GET /api/ota/status` setelah reboot: partisi berpindah
+    ke **`ota_1`**, state `valid` (rollback berhasil dibatalkan otomatis
+    karena boot sukses sampai `app_main`).
+
 ### Bug signifikan yang ditemukan & diperbaiki selama verifikasi hardware
+- **Flash dikonfigurasi 8MB padahal fisiknya 16MB**: sejak awal proyek
+  `sdkconfig.defaults`/`partitions.csv` mengasumsikan flash 8MB tanpa
+  pernah dicek ke hardware asli. Ketahuan saat merencanakan fitur OTA
+  (butuh partisi ekstra) dan mengecek `esptool flash_id` di device -
+  separuh kapasitas flash (8MB) tidak pernah terpakai selama ini.
+  Diperbaiki bersamaan dengan menambah dual app partition OTA.
 - **Stack overflow di `fbd_json_parse()`**: `sizeof(fbd_graph_t)` ~19KB,
   jauh lebih besar dari stack task `httpd` (default 4-8KB). Versi awal
   menaruh `fbd_graph_t tmp;` sebagai local variable di dalam

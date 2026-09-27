@@ -11,6 +11,9 @@
 #include "fbd_json.h"
 #include "wifi_mgr.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "esp_ota_ops.h"
+#include "esp_app_format.h"
 
 static const char *TAG = "web_ui";
 static logic_program_t *s_legacy_prog = NULL;
@@ -383,6 +386,138 @@ static esp_err_t network_post_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+/* ---- POST /api/ota : upload firmware .bin lewat browser (input type=file),
+ * tulis ke partisi app yang SEDANG TIDAK AKTIF (esp_ota_get_next_update_
+ * partition - otomatis pilih ota_0/ota_1 mana pun yang bukan sedang jalan),
+ * lalu set sebagai boot partition berikutnya dan reboot.
+ *
+ * Rollback otomatis (CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE, lihat
+ * sdkconfig.defaults + partitions.csv): kalau firmware baru gagal boot
+ * sampai app_main() memanggil esp_ota_mark_app_valid_cancel_rollback()
+ * (lihat main.c confirm_ota_boot_healthy()), bootloader otomatis kembali
+ * ke firmware LAMA di boot berikutnya - device TIDAK PERNAH ter-brick
+ * hanya karena upload firmware yang salah/corrupt, selama bootloader
+ * sendiri masih hidup (partisi bootloader/partition-table tidak disentuh
+ * OTA sama sekali).
+ *
+ * TIDAK ADA validasi isi .bin di sini selain yang esp_ota_ops sendiri
+ * lakukan (magic byte esp_image_header_t, checksum) - kalau user upload
+ * file yang bukan build project ini, boot berikutnya kemungkinan besar
+ * gagal dan otomatis rollback (bukan jaminan aman, tapi tidak bisa
+ * mem-brick device permanen). */
+#define OTA_MAX_SIZE (3 * 1024 * 1024) /* muat di partisi ota_0/ota_1 3MB */
+
+static esp_err_t ota_post_handler(httpd_req_t *req)
+{
+    int total = req->content_len;
+    if (total <= 0 || total > OTA_MAX_SIZE) {
+        return send_json_error(req, "ukuran firmware tidak valid (maks 3MB, sesuai partisi ota_0/ota_1)");
+    }
+
+    const esp_partition_t *update_partition = esp_ota_get_next_update_partition(NULL);
+    if (!update_partition) {
+        return send_json_error(req, "tidak ada partisi OTA tersedia (partition table tidak dual app?)");
+    }
+
+    esp_ota_handle_t ota_handle;
+    esp_err_t err = esp_ota_begin(update_partition, OTA_SIZE_UNKNOWN, &ota_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_ota_begin gagal: %s", esp_err_to_name(err));
+        return send_json_error(req, "gagal memulai OTA (esp_ota_begin)");
+    }
+
+    char buf[1024];
+    int received = 0;
+    bool write_failed = false;
+    while (received < total) {
+        int to_read = total - received;
+        if (to_read > (int)sizeof(buf)) to_read = sizeof(buf);
+        int r = httpd_req_recv(req, buf, to_read);
+        if (r <= 0) {
+            write_failed = true;
+            break;
+        }
+        if (esp_ota_write(ota_handle, buf, r) != ESP_OK) {
+            write_failed = true;
+            break;
+        }
+        received += r;
+    }
+
+    if (write_failed) {
+        esp_ota_abort(ota_handle);
+        ESP_LOGW(TAG, "OTA gagal: hanya %d/%d byte diterima/ditulis", received, total);
+        return send_json_error(req, "gagal menerima/menulis firmware di tengah upload - partisi lama TIDAK disentuh, aman dicoba lagi");
+    }
+
+    err = esp_ota_end(ota_handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_ota_end gagal: %s (kemungkinan file .bin corrupt/bukan firmware valid)", esp_err_to_name(err));
+        return send_json_error(req, "firmware tidak valid (gagal validasi image) - partisi lama TIDAK disentuh");
+    }
+
+    err = esp_ota_set_boot_partition(update_partition);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_ota_set_boot_partition gagal: %s", esp_err_to_name(err));
+        return send_json_error(req, "gagal set boot partition");
+    }
+
+    ESP_LOGI(TAG, "OTA sukses (%d byte) ke partisi %s, reboot dalam 1 detik...",
+             total, update_partition->label);
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"ok\",\"message\":\"Firmware diterima, device reboot sekarang.\"}");
+
+    /* Beri waktu response HTTP terkirim penuh ke browser sebelum reboot -
+     * kalau restart() dipanggil langsung, browser sering melihat koneksi
+     * putus tanpa response (terlihat seperti gagal padahal sebenarnya
+     * sukses). vTaskDelay di task httpd aman (blocking task ini saja,
+     * bukan seluruh sistem - fbd_scan_task tetap jalan normal). */
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    esp_restart();
+    return ESP_OK; /* tidak pernah tercapai - esp_restart() tidak return */
+}
+
+/* ---- GET /api/ota/status : info versi/partisi firmware yang sedang
+ * jalan, dipakai UI System > Firmware untuk tampilkan status sebelum
+ * user upload .bin baru. ---- */
+
+static esp_err_t ota_status_get_handler(httpd_req_t *req)
+{
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    esp_app_desc_t app_desc;
+    esp_ota_img_states_t state = ESP_OTA_IMG_UNDEFINED;
+    if (running) {
+        esp_ota_get_state_partition(running, &state);
+    }
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "running_partition", running ? running->label : "?");
+    if (esp_ota_get_partition_description(running, &app_desc) == ESP_OK) {
+        cJSON_AddStringToObject(root, "version", app_desc.version);
+        cJSON_AddStringToObject(root, "compile_time", app_desc.time);
+        cJSON_AddStringToObject(root, "compile_date", app_desc.date);
+    }
+    const char *state_str = "unknown";
+    switch (state) {
+        case ESP_OTA_IMG_VALID:          state_str = "valid"; break;
+        case ESP_OTA_IMG_PENDING_VERIFY: state_str = "pending_verify"; break;
+        case ESP_OTA_IMG_UNDEFINED:      state_str = "undefined"; break;
+        case ESP_OTA_IMG_NEW:            state_str = "new"; break;
+        case ESP_OTA_IMG_INVALID:        state_str = "invalid"; break;
+        case ESP_OTA_IMG_ABORTED:        state_str = "aborted"; break;
+        default: break;
+    }
+    cJSON_AddStringToObject(root, "state", state_str);
+
+    char *out = cJSON_PrintUnformatted(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, out);
+    free(out);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
 static void mount_spiffs(void)
 {
     esp_vfs_spiffs_conf_t conf = {
@@ -462,7 +597,7 @@ void web_ui_start(logic_program_t *legacy_prog,
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.uri_match_fn = httpd_uri_match_wildcard;
-    config.max_uri_handlers = 10;
+    config.max_uri_handlers = 12;
     /* Default 4096 terlalu kecil untuk program_post_handler/program_get_handler
      * yang memanggil cJSON print/parse rekursif atas dokumen berisi puluhan
      * node - pernah menyebabkan stack overflow yang merusak heap TLSF secara
@@ -480,6 +615,8 @@ void web_ui_start(logic_program_t *legacy_prog,
     httpd_uri_t status_uri = { .uri = "/api/status", .method = HTTP_GET, .handler = status_get_handler };
     httpd_uri_t network_get_uri = { .uri = "/api/network", .method = HTTP_GET, .handler = network_get_handler };
     httpd_uri_t network_post_uri = { .uri = "/api/network", .method = HTTP_POST, .handler = network_post_handler };
+    httpd_uri_t ota_post_uri = { .uri = "/api/ota", .method = HTTP_POST, .handler = ota_post_handler };
+    httpd_uri_t ota_status_uri = { .uri = "/api/ota/status", .method = HTTP_GET, .handler = ota_status_get_handler };
     /* Wildcard, harus didaftarkan setelah /api/... supaya tidak menutupi -
      * httpd_uri_match_wildcard cocokkan URI paling spesifik dulu terlepas
      * urutan register, tapi tetap didaftarkan terakhir untuk kejelasan. */
@@ -490,6 +627,8 @@ void web_ui_start(logic_program_t *legacy_prog,
     httpd_register_uri_handler(server, &status_uri);
     httpd_register_uri_handler(server, &network_get_uri);
     httpd_register_uri_handler(server, &network_post_uri);
+    httpd_register_uri_handler(server, &ota_post_uri);
+    httpd_register_uri_handler(server, &ota_status_uri);
     httpd_register_uri_handler(server, &static_uri);
 
     ESP_LOGI(TAG, "web server siap");

@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<title>System &gt; Firmware</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="network-page">
+
+<div class="network-card">
+  <h3>System &gt; Firmware (OTA)</h3>
+
+  <div class="properties-field">
+    <label>Firmware yang sedang jalan</label>
+    <p id="ota-status-text" class="properties-empty">Memuat...</p>
+  </div>
+
+  <div class="properties-help">
+    Upload file <code>esp32_web_logic.bin</code> hasil <code>idf.py build</code>
+    (di folder <code>build/</code> project). Firmware baru ditulis ke partisi
+    OTA yang SEDANG TIDAK AKTIF - partisi yang sedang jalan sekarang TIDAK
+    disentuh sampai firmware baru terbukti valid. Device otomatis reboot
+    setelah upload selesai. Kalau firmware baru gagal boot berulang kali,
+    device otomatis ROLLBACK ke firmware lama dengan sendirinya - tidak akan
+    ter-brick karena upload yang salah/corrupt.
+  </div>
+
+  <div class="properties-field">
+    <label for="ota-file">File firmware (.bin)</label>
+    <input type="file" id="ota-file" accept=".bin">
+  </div>
+
+  <button id="ota-upload-btn" onclick="uploadFirmware()">Upload &amp; Reboot</button>
+  <a href="/" class="network-back-link">&larr; Kembali ke editor</a>
+  <a href="/network.html" class="network-back-link">System &gt; Network &rarr;</a>
+
+  <div class="properties-field" id="ota-progress-row" style="display:none; margin-top: 14px;">
+    <label>Progress upload</label>
+    <progress id="ota-progress" value="0" max="100" style="width:100%"></progress>
+  </div>
+  <p id="ota-save-status" class="properties-empty"></p>
+</div>
+
+<script>
+async function loadOtaStatus() {
+    try {
+        const res = await fetch('/api/ota/status');
+        const data = await res.json();
+        const version = data.version ? ` v${data.version}` : '';
+        const compiled = data.compile_date ? ` (build ${data.compile_date} ${data.compile_time})` : '';
+        document.getElementById('ota-status-text').textContent =
+            `Partisi "${data.running_partition}"${version}${compiled} - status: ${data.state}`;
+    } catch (err) {
+        document.getElementById('ota-status-text').textContent = 'Gagal memuat status: ' + err.message;
+    }
+}
+
+function uploadFirmware() {
+    const fileInput = document.getElementById('ota-file');
+    const statusEl = document.getElementById('ota-save-status');
+    const progressRow = document.getElementById('ota-progress-row');
+    const progressBar = document.getElementById('ota-progress');
+    const btn = document.getElementById('ota-upload-btn');
+
+    if (!fileInput.files || fileInput.files.length === 0) {
+        statusEl.textContent = 'Pilih file .bin dulu';
+        statusEl.style.color = '#c00';
+        return;
+    }
+    const file = fileInput.files[0];
+
+    if (!confirm(`Upload "${file.name}" (${(file.size / 1024).toFixed(0)} KB) dan reboot device sekarang?`)) {
+        return;
+    }
+
+    btn.disabled = true;
+    progressRow.style.display = 'block';
+    statusEl.textContent = 'Mengupload...';
+    statusEl.style.color = '#080';
+
+    /* Pakai XMLHttpRequest (bukan fetch) supaya bisa pantau progress upload -
+     * fetch belum punya API upload-progress standar di semua browser. */
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/ota');
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+
+    xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+            progressBar.value = Math.round((e.loaded / e.total) * 100);
+        }
+    };
+
+    xhr.onload = () => {
+        if (xhr.status === 200) {
+            statusEl.textContent = 'Upload sukses, device sedang reboot dengan firmware baru...';
+            statusEl.style.color = '#080';
+        } else {
+            let msg = xhr.statusText;
+            try { msg = JSON.parse(xhr.responseText).message || msg; } catch (e) {}
+            statusEl.textContent = 'Gagal: ' + msg;
+            statusEl.style.color = '#c00';
+            btn.disabled = false;
+        }
+    };
+    xhr.onerror = () => {
+        /* Device reboot sebelum browser sempat terima response = network
+         * error di sisi browser walau upload sebenarnya SUKSES - beri pesan
+         * yang tidak membingungkan, bukan cuma "error". */
+        statusEl.textContent = 'Koneksi terputus - kemungkinan device sedang reboot (normal setelah OTA sukses). Tunggu beberapa detik lalu refresh.';
+        statusEl.style.color = '#080';
+        btn.disabled = false;
+    };
+
+    xhr.send(file);
+}
+
+loadOtaStatus();
+</script>
+</body>
+</html>
