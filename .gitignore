@@ -1,0 +1,16 @@
+# ESP-IDF build output
+build/
+sdkconfig
+sdkconfig.old
+managed_components/
+dependencies.lock
+
+# Test host build artifacts (lihat test_host/build_and_run.ps1)
+test_host/*.exe
+test_host/*.obj
+test_host/*.pdb
+test_host/*.ilk
+
+# Editor
+.vscode/.vsix
+*.swp
