@@ -26,16 +26,40 @@ static fbd_graph_t s_scratch_graph;
  * cycle sedang membaca graph yang sama. */
 static SemaphoreHandle_t s_graph_mutex = NULL;
 
-/* ---- Serve halaman editor dari SPIFFS ---- */
+/* ---- Serve file statis (editor Drawflow) dari SPIFFS ---- */
 
-static esp_err_t index_get_handler(httpd_req_t *req)
+static const char *guess_content_type(const char *path)
 {
-    FILE *f = fopen("/spiffs/index.html", "r");
+    const char *ext = strrchr(path, '.');
+    if (!ext) return "application/octet-stream";
+    if (strcmp(ext, ".html") == 0) return "text/html";
+    if (strcmp(ext, ".js") == 0)   return "application/javascript";
+    if (strcmp(ext, ".css") == 0)  return "text/css";
+    if (strcmp(ext, ".json") == 0) return "application/json";
+    return "application/octet-stream";
+}
+
+/* Handler wildcard untuk semua GET selain /api/... : "/" -> index.html,
+ * selain itu diambil apa adanya dari /spiffs (misal /app.js -> /spiffs/app.js).
+ * Diperlukan karena editor Drawflow terdiri dari beberapa file
+ * (index.html, app.js, node-types.js, style.css, drawflow.min.js/css),
+ * bukan cuma satu index.html seperti versi editor v1. */
+static esp_err_t static_get_handler(httpd_req_t *req)
+{
+    char path[160] = "/spiffs";
+    const char *uri = req->uri;
+    if (strcmp(uri, "/") == 0) {
+        strncat(path, "/index.html", sizeof(path) - strlen(path) - 1);
+    } else {
+        strncat(path, uri, sizeof(path) - strlen(path) - 1);
+    }
+
+    FILE *f = fopen(path, "r");
     if (!f) {
-        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "index.html tidak ditemukan di SPIFFS");
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "file tidak ditemukan di SPIFFS");
         return ESP_FAIL;
     }
-    httpd_resp_set_type(req, "text/html");
+    httpd_resp_set_type(req, guess_content_type(path));
     char buf[512];
     size_t n;
     while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
@@ -202,15 +226,18 @@ void web_ui_start(logic_program_t *legacy_prog, fbd_graph_t *active_graph)
         return;
     }
 
-    httpd_uri_t index_uri = { .uri = "/", .method = HTTP_GET, .handler = index_get_handler };
     httpd_uri_t program_post_uri = { .uri = "/api/program", .method = HTTP_POST, .handler = program_post_handler };
     httpd_uri_t program_get_uri = { .uri = "/api/program", .method = HTTP_GET, .handler = program_get_handler };
     httpd_uri_t status_uri = { .uri = "/api/status", .method = HTTP_GET, .handler = status_get_handler };
+    /* Wildcard, harus didaftarkan setelah /api/... supaya tidak menutupi -
+     * httpd_uri_match_wildcard cocokkan URI paling spesifik dulu terlepas
+     * urutan register, tapi tetap didaftarkan terakhir untuk kejelasan. */
+    httpd_uri_t static_uri = { .uri = "/*", .method = HTTP_GET, .handler = static_get_handler };
 
-    httpd_register_uri_handler(server, &index_uri);
     httpd_register_uri_handler(server, &program_post_uri);
     httpd_register_uri_handler(server, &program_get_uri);
     httpd_register_uri_handler(server, &status_uri);
+    httpd_register_uri_handler(server, &static_uri);
 
     ESP_LOGI(TAG, "web server siap");
 }

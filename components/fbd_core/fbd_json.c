@@ -96,6 +96,24 @@ static bool str_to_math_op(const char *s, fbd_math_op_t *out)
     return false;
 }
 
+static const char *pin_mode_to_str(fbd_pin_mode_t mode)
+{
+    switch (mode) {
+        case FBD_PIN_MODE_PULLUP:   return "pullup";
+        case FBD_PIN_MODE_PULLDOWN: return "pulldown";
+        case FBD_PIN_MODE_FLOATING: return "floating";
+        default:                    return "pullup";
+    }
+}
+
+static bool str_to_pin_mode(const char *s, fbd_pin_mode_t *out)
+{
+    if (strcmp(s, "pullup") == 0)   { *out = FBD_PIN_MODE_PULLUP;   return true; }
+    if (strcmp(s, "pulldown") == 0) { *out = FBD_PIN_MODE_PULLDOWN; return true; }
+    if (strcmp(s, "floating") == 0) { *out = FBD_PIN_MODE_FLOATING; return true; }
+    return false;
+}
+
 /* ---- parse params per node type ---- */
 
 /* params boleh NULL untuk node type yang tidak butuh params (and/or/not/dst) -
@@ -204,11 +222,26 @@ static bool parse_params(const cJSON *params, fbd_node_t *node, char *err, size_
             node->params.preset = (int32_t)cJSON_GetNumberValue(preset);
             break;
         }
-        case FBD_NODE_DIGITAL_IN:
+        case FBD_NODE_DIGITAL_IN: {
+            const cJSON *pin = cJSON_GetObjectItem(params, "pin");
+            if (!pin) {
+                set_err(err, err_len, "digital_input: params.pin wajib");
+                return false;
+            }
+            node->params.pin = (int)cJSON_GetNumberValue(pin);
+            const cJSON *invert = cJSON_GetObjectItem(params, "invert");
+            node->params.invert = invert ? cJSON_IsTrue(invert) : false;
+            const cJSON *mode = cJSON_GetObjectItem(params, "mode");
+            if (!cJSON_IsString(mode) || !str_to_pin_mode(mode->valuestring, &node->params.pin_mode)) {
+                set_err(err, err_len, "digital_input: params.mode tidak valid (pullup/pulldown/floating)");
+                return false;
+            }
+            break;
+        }
         case FBD_NODE_DIGITAL_OUT: {
             const cJSON *pin = cJSON_GetObjectItem(params, "pin");
             if (!pin) {
-                set_err(err, err_len, "digital_input/digital_output: params.pin wajib");
+                set_err(err, err_len, "digital_output: params.pin wajib");
                 return false;
             }
             node->params.pin = (int)cJSON_GetNumberValue(pin);
@@ -401,6 +434,10 @@ static cJSON *serialize_params(const fbd_node_t *node)
             cJSON_AddNumberToObject(params, "preset", node->params.preset);
             break;
         case FBD_NODE_DIGITAL_IN:
+            cJSON_AddNumberToObject(params, "pin", node->params.pin);
+            cJSON_AddStringToObject(params, "mode", pin_mode_to_str(node->params.pin_mode));
+            cJSON_AddBoolToObject(params, "invert", node->params.invert);
+            break;
         case FBD_NODE_DIGITAL_OUT:
             cJSON_AddNumberToObject(params, "pin", node->params.pin);
             cJSON_AddBoolToObject(params, "invert", node->params.invert);

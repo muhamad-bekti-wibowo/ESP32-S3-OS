@@ -2,227 +2,27 @@
 <html lang="id">
 <head>
 <meta charset="UTF-8">
-<title>ESP32 Web Logic Editor</title>
-<style>
-  body { font-family: sans-serif; margin: 0; display: flex; height: 100vh; }
-  #palette { width: 160px; background: #222; color: #fff; padding: 10px; }
-  #palette button { display: block; width: 100%; margin-bottom: 6px; padding: 6px; cursor: pointer; }
-  #canvas-wrap { flex: 1; position: relative; overflow: auto; background: #f4f4f4; }
-  #canvas { position: relative; width: 2000px; height: 1500px; }
-  .block { position: absolute; width: 130px; background: #fff; border: 2px solid #333; border-radius: 6px; padding: 6px; cursor: move; font-size: 12px; user-select: none; }
-  .block .title { font-weight: bold; margin-bottom: 4px; }
-  .block .port { font-size: 10px; color: #555; }
-  .port-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #06c; cursor: crosshair; margin-right: 4px; }
-  svg#wires { position: absolute; top:0; left:0; width: 2000px; height: 1500px; pointer-events: none; }
-  #toolbar { position: fixed; top: 10px; right: 10px; }
-  #toolbar button { padding: 8px 14px; }
-  select, input[type=number] { width: 90%; font-size: 11px; }
-</style>
+<title>ESP32 FBD Editor</title>
+<link rel="stylesheet" href="drawflow.min.css">
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 
 <div id="palette">
-  <h3>Block</h3>
-  <button onclick="addBlock('const')">Const</button>
-  <button onclick="addBlock('input')">Input (GPIO)</button>
-  <button onclick="addBlock('output')">Output (GPIO)</button>
-  <button onclick="addBlock('compare')">Compare</button>
-  <button onclick="addBlock('if_else')">If / Else</button>
-  <button onclick="addBlock('counter')">Counter</button>
-  <button onclick="addBlock('math')">Math</button>
-  <hr>
-  <p style="font-size:11px">Klik titik biru output lalu klik input tujuan untuk membuat wire.</p>
+  <h3>Node</h3>
+  <div id="palette-list"></div>
 </div>
 
-<div id="canvas-wrap">
-  <svg id="wires"></svg>
-  <div id="canvas"></div>
-</div>
+<div id="drawflow" class="drawflow-wrap"></div>
 
 <div id="toolbar">
-  <button onclick="uploadProgram()">Kirim ke ESP32</button>
-  <button onclick="refreshStatus()">Refresh Status</button>
+  <button onclick="saveProgram()">Save</button>
+  <button onclick="loadProgram()">Load</button>
+  <span id="toolbar-status"></span>
 </div>
 
-<script>
-let blocks = [];      // {id, type, x, y, cfg, name}
-let nextId = 0;
-let wireStart = null; // {blockId}
-
-function addBlock(type) {
-  const id = nextId++;
-  const b = { id, type, x: 200 + (id%5)*40, y: 40 + (id%5)*40, cfg: defaultCfg(type), in: [-1,-1,-1,-1], name: type + id };
-  blocks.push(b);
-  render();
-}
-
-function defaultCfg(type) {
-  switch (type) {
-    case 'const': return { value: 0 };
-    case 'input': return { gpio: 0, analog: false };
-    case 'output': return { gpio: 2 };
-    case 'compare': return { op: '>' };
-    case 'math': return { op: '+' };
-    case 'counter': return { preset: 0, count_up: true };
-    default: return {};
-  }
-}
-
-function numInputs(type) {
-  switch (type) {
-    case 'output': return 1;
-    case 'compare': return 2;
-    case 'math': return 2;
-    case 'if_else': return 3;
-    case 'counter': return 2; // clock, reset
-    default: return 0;
-  }
-}
-
-function inputLabel(type, idx) {
-  if (type === 'if_else') return ['cond','if_true','if_false'][idx];
-  if (type === 'counter') return ['clock','reset'][idx];
-  if (type === 'compare' || type === 'math') return ['A','B'][idx];
-  if (type === 'output') return 'value';
-  return 'in'+idx;
-}
-
-function render() {
-  const canvas = document.getElementById('canvas');
-  canvas.innerHTML = '';
-  blocks.forEach(b => {
-    const el = document.createElement('div');
-    el.className = 'block';
-    el.style.left = b.x + 'px';
-    el.style.top = b.y + 'px';
-    el.dataset.id = b.id;
-
-    let html = `<div class="title">#${b.id} ${b.type}</div>`;
-    html += cfgHtml(b);
-
-    const nIn = numInputs(b.type);
-    for (let i = 0; i < nIn; i++) {
-      html += `<div class="port"><span class="port-dot" onclick="connectClick(${b.id},${i})"></span>${inputLabel(b.type,i)}: <span id="wire-label-${b.id}-${i}">${b.in[i] >= 0 ? '#'+b.in[i] : '-'}</span></div>`;
-    }
-    if (b.type !== 'output') {
-      html += `<div class="port" style="text-align:right">out <span class="port-dot" onclick="outputClick(${b.id})"></span></div>`;
-    }
-
-    el.innerHTML = html;
-    makeDraggable(el, b);
-    canvas.appendChild(el);
-  });
-  drawWires();
-}
-
-function cfgHtml(b) {
-  switch (b.type) {
-    case 'const':
-      return `<input type="number" value="${b.cfg.value}" onchange="updateCfg(${b.id},'value',parseFloat(this.value))">`;
-    case 'input':
-      return `GPIO <input type="number" value="${b.cfg.gpio}" onchange="updateCfg(${b.id},'gpio',parseInt(this.value))">`;
-    case 'output':
-      return `GPIO <input type="number" value="${b.cfg.gpio}" onchange="updateCfg(${b.id},'gpio',parseInt(this.value))">`;
-    case 'compare':
-      return `<select onchange="updateCfg(${b.id},'op',this.value)">
-        ${['>','<','==','!=','>=','<='].map(o=>`<option ${o===b.cfg.op?'selected':''}>${o}</option>`).join('')}
-      </select>`;
-    case 'math':
-      return `<select onchange="updateCfg(${b.id},'op',this.value)">
-        ${['+','-','*','/'].map(o=>`<option ${o===b.cfg.op?'selected':''}>${o}</option>`).join('')}
-      </select>`;
-    case 'counter':
-      return `preset <input type="number" value="${b.cfg.preset}" onchange="updateCfg(${b.id},'preset',parseInt(this.value))">`;
-    default:
-      return '';
-  }
-}
-
-function updateCfg(id, key, val) {
-  const b = blocks.find(x => x.id === id);
-  b.cfg[key] = val;
-}
-
-function connectClick(blockId, portIdx) {
-  if (wireStart !== null) {
-    const b = blocks.find(x => x.id === blockId);
-    b.in[portIdx] = wireStart.blockId;
-    wireStart = null;
-    render();
-  }
-}
-
-function outputClick(blockId) {
-  wireStart = { blockId };
-}
-
-function makeDraggable(el, b) {
-  let dragging = false, offX, offY;
-  el.addEventListener('mousedown', e => {
-    if (e.target.classList.contains('port-dot') || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-    dragging = true;
-    offX = e.clientX - b.x;
-    offY = e.clientY - b.y;
-  });
-  document.addEventListener('mousemove', e => {
-    if (!dragging) return;
-    b.x = e.clientX - offX;
-    b.y = e.clientY - offY;
-    el.style.left = b.x + 'px';
-    el.style.top = b.y + 'px';
-    drawWires();
-  });
-  document.addEventListener('mouseup', () => dragging = false);
-}
-
-function drawWires() {
-  const svg = document.getElementById('wires');
-  svg.innerHTML = '';
-  blocks.forEach(b => {
-    b.in.forEach((srcId, portIdx) => {
-      if (srcId < 0) return;
-      const src = blocks.find(x => x.id === srcId);
-      if (!src) return;
-      const x1 = src.x + 130, y1 = src.y + 20;
-      const x2 = b.x, y2 = b.y + 30 + portIdx * 14;
-      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      const midX = (x1 + x2) / 2;
-      path.setAttribute('d', `M${x1},${y1} C${midX},${y1} ${midX},${y2} ${x2},${y2}`);
-      path.setAttribute('stroke', '#06c');
-      path.setAttribute('fill', 'none');
-      path.setAttribute('stroke-width', '2');
-      svg.appendChild(path);
-    });
-  });
-}
-
-function toProgramJson() {
-  return {
-    blocks: blocks.map(b => ({
-      name: b.name,
-      type: b.type,
-      in: b.in,
-      cfg: b.cfg
-    }))
-  };
-}
-
-async function uploadProgram() {
-  const res = await fetch('/api/program', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(toProgramJson())
-  });
-  alert(res.ok ? 'Program terkirim' : 'Gagal: ' + await res.text());
-}
-
-async function refreshStatus() {
-  const res = await fetch('/api/status');
-  const data = await res.json();
-  alert(JSON.stringify(data));
-}
-
-render();
-</script>
+<script src="drawflow.min.js"></script>
+<script src="node-types.js"></script>
+<script src="app.js"></script>
 </body>
 </html>

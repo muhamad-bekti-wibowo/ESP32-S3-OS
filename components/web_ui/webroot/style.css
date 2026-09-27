@@ -1,0 +1,83 @@
+html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    font-family: sans-serif;
+}
+
+body {
+    display: flex;
+}
+
+#palette {
+    width: 160px;
+    background: #222;
+    color: #fff;
+    padding: 10px;
+    box-sizing: border-box;
+    overflow-y: auto;
+}
+
+#palette h3 {
+    margin-top: 0;
+}
+
+#palette-list button {
+    display: block;
+    width: 100%;
+    margin-bottom: 6px;
+    padding: 6px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.drawflow-wrap {
+    flex: 1;
+    position: relative;
+    background: #f4f4f4;
+}
+
+#toolbar {
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    z-index: 10;
+    background: #fff;
+    padding: 8px;
+    border-radius: 6px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+}
+
+#toolbar button {
+    padding: 8px 14px;
+    margin-right: 6px;
+    cursor: pointer;
+}
+
+#toolbar-status {
+    font-size: 12px;
+}
+
+.fbd-node-title {
+    font-weight: bold;
+    font-size: 12px;
+    margin-bottom: 4px;
+    padding: 2px 6px;
+}
+
+.fbd-field {
+    font-size: 11px;
+    padding: 2px 6px;
+}
+
+.fbd-field label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 4px;
+}
+
+.fbd-field input, .fbd-field select {
+    width: 70px;
+    font-size: 11px;
+}

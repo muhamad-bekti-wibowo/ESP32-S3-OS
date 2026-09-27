@@ -42,6 +42,12 @@ typedef enum {
     FBD_NODE_TYPE_COUNT
 } fbd_node_type_t;
 
+typedef enum {
+    FBD_PIN_MODE_PULLUP = 0,
+    FBD_PIN_MODE_PULLDOWN,
+    FBD_PIN_MODE_FLOATING
+} fbd_pin_mode_t;
+
 typedef struct {
     fbd_value_t const_value;         /* FBD_NODE_CONST */
     char var_name[FBD_VAR_NAME_LEN]; /* FBD_NODE_VAR_GET / FBD_NODE_VAR_SET */
@@ -53,6 +59,7 @@ typedef struct {
     int32_t preset;                    /* FBD_NODE_CTU */
     int pin;                            /* FBD_NODE_DIGITAL_IN/OUT */
     bool invert;                        /* FBD_NODE_DIGITAL_IN/OUT */
+    fbd_pin_mode_t pin_mode;            /* FBD_NODE_DIGITAL_IN saja */
 } fbd_node_params_t;
 
 typedef struct {

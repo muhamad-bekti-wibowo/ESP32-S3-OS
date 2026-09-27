@@ -81,6 +81,11 @@ static void test_roundtrip(void)
     CHECK(g2.nodes[n2_idx].type == FBD_NODE_TON, "round-trip: n2 masih FBD_NODE_TON");
     CHECK(g2.nodes[n2_idx].params.delay_ms == 2000, "round-trip: n2 params.delay_ms tetap 2000");
 
+    size_t n1_idx = fbd_graph_find_node(&g2, "n1");
+    CHECK(g2.nodes[n1_idx].params.pin == 4, "round-trip: n1 (digital_input) params.pin tetap 4");
+    CHECK(g2.nodes[n1_idx].params.pin_mode == FBD_PIN_MODE_PULLUP,
+          "round-trip: n1 params.mode tetap pullup (bukan hilang/default salah)");
+
     free(serialized_str);
     cJSON_Delete(serialized);
     cJSON_Delete(root2);

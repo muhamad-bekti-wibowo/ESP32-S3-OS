@@ -34,9 +34,20 @@ editor visual berbasis Drawflow yang di-hosting langsung dari ESP32-S3.
 - Firmware WiFi mode APSTA (`wifi_mgr_start_apsta`): AP `ESP32-WebLogic`
   tetap aktif, ditambah koneksi STA ke jaringan rumah — memudahkan akses
   device dari PC dev tanpa pindah koneksi WiFi manual berulang kali.
-- **Berikutnya:** editor visual berbasis Drawflow, lalu I/O fisik Level 1
-  (ADC/PWM/servo) dan Level 2 (I2C primitive, WiFi sebagai system
-  variable).
+- **Selesai:** editor visual berbasis Drawflow di-vendor ke `webroot/`
+  (offline, tanpa CDN). Tiap node type Level 0-1 di-registrasi 1:1 lewat
+  metadata terpusat (`node-types.js`). Converter dua arah eksplisit
+  (`drawflowToSchema`/`schemaToDrawflow` di `app.js`) — dites headless
+  (Node.js, tanpa browser/DOM) untuk skenario dari kriteria selesai
+  (2× `digital_input` → `AND` → `digital_output`), dan dites end-to-end
+  lewat HTTP nyata ke device (`POST` lalu `GET /api/program` identik).
+  **Belum dikonfirmasi:** klik manual drag-drop di canvas browser
+  sungguhan (buka node dari palette, sambung wire dengan mouse, klik
+  tombol Save/Load) — logic-nya sudah terbukti benar lewat test headless
+  + endpoint HTTP, tapi interaksi UI itu sendiri (event listener Drawflow,
+  render form params di node) belum diklik langsung oleh manusia.
+- **Berikutnya:** I/O fisik Level 1 (ADC/PWM/servo, simulated dulu baru
+  real) dan Level 2 (I2C primitive, WiFi sebagai system variable).
 
 ### Bug signifikan yang ditemukan & diperbaiki selama verifikasi hardware
 - **Stack overflow di `fbd_json_parse()`**: `sizeof(fbd_graph_t)` ~19KB,
@@ -48,6 +59,18 @@ editor visual berbasis Drawflow yang di-hosting langsung dari ESP32-S3.
   bug ada di firmware. Diperbaiki dengan menulis langsung ke `*out_graph`
   yang disediakan caller (scratch buffer statis), bukan local variable.
   Lihat komentar di `fbd_json.h`/`fbd_json.c` untuk detail kontraknya.
+- **`web_ui.c` hanya serve `index.html`**: editor Drawflow butuh beberapa
+  file terpisah (`app.js`, `node-types.js`, `style.css`, `drawflow.min.*`),
+  tapi handler `GET /` lama hardcode hanya kirim `/spiffs/index.html` —
+  file lain 404. Diperbaiki jadi handler wildcard generik yang serve file
+  apa pun dari SPIFFS berdasarkan URI, dengan MIME type sesuai ekstensi.
+- **`params.mode` untuk `digital_input` tidak pernah disimpan**: field ini
+  ada di contoh schema.md sejak awal, tapi `fbd_node_params_t` tidak
+  punya field untuk itu — `fbd_json_parse()` diam-diam mengabaikannya dan
+  `fbd_json_serialize()` tidak pernah menuliskannya balik. Ketahuan lewat
+  uji end-to-end (POST lalu GET, `mode` hilang dari hasil). Diperbaiki
+  dengan menambah `fbd_pin_mode_t` + field `pin_mode` di params, divalidasi
+  wajib saat parse.
 
 ## Arsitektur
 
@@ -100,8 +123,10 @@ idf.py build
 idf.py -p <PORT> flash monitor
 ```
 
-Setelah boot, konek ke WiFi AP `ESP32-WebLogic`, buka `http://192.168.4.1`,
-susun block di editor, klik **Kirim ke ESP32**.
+Setelah boot, buka `http://192.168.4.1` (via AP `ESP32-WebLogic`) atau IP
+STA device (dicetak di log serial saat boot, lewat jaringan rumah). Susun
+node lewat palette di editor Drawflow, sambungkan port, klik **Save**
+untuk kirim ke device, **Load** untuk ambil graph aktif dari device.
 
 ## Menjalankan test host (tanpa hardware)
 
@@ -121,7 +146,7 @@ Xtensa/RISC-V ESP dan tidak bisa menghasilkan binary native PC.
 - [x] Level 0 — Logic/Math/Timer/Data murni software (`fbd_core`)
 - [x] Runtime graph dengan topological sort + dual-task FreeRTOS
 - [x] Schema JSON di-freeze + endpoint save/load
-- [ ] Editor visual Drawflow
+- [x] Editor visual Drawflow
 - [ ] Level 1 — I/O fisik (ADC/PWM/servo), simulated dulu baru real
 - [ ] Level 2 — I2C primitive register-level + WiFi sebagai system variable
 - [ ] Live update program tanpa reboot, dual-buffer graph swap

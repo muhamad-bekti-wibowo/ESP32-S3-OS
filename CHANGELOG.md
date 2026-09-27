@@ -4,6 +4,32 @@ Semua perubahan penting proyek ini dicatat di file ini.
 
 ## [Unreleased]
 
+### Added (editor Drawflow)
+- Vendor Drawflow (drawflow.min.js/css, ~48KB total) ke `webroot/`, tanpa
+  CDN — device offline-first, AP mode tanpa internet.
+- `node-types.js`: metadata terpusat semua node Level 0-1 (label, jumlah
+  input/output, daftar field params dengan tipe & default) — satu sumber
+  kebenaran untuk palette, registrasi Drawflow node, dan converter.
+- `app.js`: `drawflowToSchema()`/`schemaToDrawflow()` (converter dua arah
+  eksplisit, terpisah dari kode UI umum), `saveProgram()`/`loadProgram()`
+  (fetch ke `/api/program`). Dites headless via Node.js (tanpa browser)
+  untuk skenario 2× `digital_input` → `AND` → `digital_output`, dan dites
+  end-to-end via HTTP nyata ke device.
+- `index.html` diganti total: canvas Drawflow + toolbar Save/Load,
+  menggantikan editor v1 (canvas manual custom, format JSON lama).
+
+### Fixed (editor Drawflow, ditemukan lewat verifikasi end-to-end)
+- `web_ui.c`: handler `GET /` lama hardcode hanya serve
+  `/spiffs/index.html` — file lain (`app.js`, `node-types.js`, dst) 404.
+  Diperbaiki jadi handler wildcard (`/*`) generik yang serve file apa pun
+  dari SPIFFS sesuai URI, dengan `Content-Type` sesuai ekstensi.
+- `fbd_graph.h`/`fbd_json.c`: field `params.mode` untuk `digital_input`
+  (ada di schema.md sejak spec 03) tidak pernah tersimpan — `fbd_node_
+  params_t` tidak punya field untuk itu, jadi parse mengabaikannya diam-
+  diam dan serialize tidak pernah menuliskannya balik. Ketahuan lewat uji
+  end-to-end (POST lalu GET, `mode` hilang). Ditambahkan `fbd_pin_mode_t`
+  + field `pin_mode`, divalidasi wajib saat parse `digital_input`.
+
 ### Added (schema JSON + endpoint save/load)
 - `schema.md`: schema JSON final untuk Level 0-1 — semua tipe node dengan
   contoh `params` konkret, aturan `links` (`{node, port}` object, bukan
