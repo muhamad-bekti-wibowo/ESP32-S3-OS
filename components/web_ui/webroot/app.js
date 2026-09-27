@@ -23,10 +23,12 @@ function buildNodeHtml(type) {
     /* Marker segitiga sengaja DI LUAR .fbd-node-title (bukan child-nya) -
      * posisinya absolute relatif ke kartu node penuh (lihat style.css
      * .fbd-node-marker), supaya selalu nempel di tepi bawah kartu, bukan
-     * ikut tinggi baris judul. */
+     * ikut tinggi baris judul. .fbd-node-live diisi live monitoring (lihat
+     * updateLiveValues()) - kosong sampai live monitor dinyalakan. */
     return `<div class="fbd-node-title">
         ${svgIcon(def.icon, 'fbd-node-icon')}
         <span class="fbd-node-label">${def.label}</span>
+        <span class="fbd-node-live" aria-hidden="true"></span>
     </div>
     <span class="fbd-node-marker" aria-hidden="true"></span>`;
 }
@@ -436,6 +438,87 @@ function schemaToDrawflow(schemaObj) {
     });
 
     return { drawflow: { Home: { data: dfNodes } } };
+}
+
+/* ---- Live monitor: polling GET /api/program, tampilkan outputs[0] tiap
+ * node langsung di canvas (badge kecil di header node) - bukan WebSocket,
+ * murni polling HTTP biasa (endpoint ini sudah ada sejak spec 06/07,
+ * field "outputs" ditambahkan khusus untuk kebutuhan monitoring, lihat
+ * fbd_json.c serialize_fbd_value()). ---- */
+
+let liveMonitorTimer = null;
+const LIVE_MONITOR_INTERVAL_MS = 600;
+
+/* Format nilai fbd_value_t (hasil JSON: bool/number/array byte/null)
+ * jadi teks pendek untuk badge - node dengan banyak field beda tipe
+ * (I2C: array byte, sys_var_get: bool/int) butuh format berbeda-beda. */
+function formatLiveValue(value) {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'boolean') return value ? 'ON' : 'OFF';
+    if (Array.isArray(value)) return '[' + value.join(',') + ']';
+    if (typeof value === 'number') {
+        return Number.isInteger(value) ? String(value) : value.toFixed(2);
+    }
+    return String(value);
+}
+
+/* dfId numeric Drawflow -> id string schema.md SELALU "n" + dfId (lihat
+ * idOf() di drawflowToSchema/schemaToDrawflow) - konsisten baik hasil
+ * Save (dari drawflowToSchema) maupun Load (dari schemaToDrawflow), jadi
+ * tidak perlu simpan map terpisah, tinggal balik formatnya. */
+function schemaIdToDfId(schemaId) {
+    return schemaId.startsWith('n') ? schemaId.slice(1) : null;
+}
+
+async function pollLiveValues() {
+    try {
+        const res = await fetch('/api/program');
+        if (!res.ok) return;
+        const schema = await res.json();
+        (schema.nodes || []).forEach(node => {
+            const dfId = schemaIdToDfId(node.id);
+            if (dfId === null) return;
+            const el = document.querySelector(`#node-${dfId} .fbd-node-live`);
+            if (!el) return;
+            const outputs = node.outputs || [];
+            /* outputs[1] (dipakai i2c_read_reg utk flag error) ikut
+             * ditampilkan kalau ada nilainya - selain itu cukup outputs[0]. */
+            const primary = formatLiveValue(outputs[0]);
+            const secondary = formatLiveValue(outputs[1]);
+            el.textContent = secondary ? `${primary} / ${secondary}` : primary;
+            el.classList.toggle('fbd-node-live-on', outputs[0] === true);
+        });
+    } catch (err) {
+        /* Diamkan - kegagalan polling sesekali (device sedang reboot OTA,
+         * WiFi putus sebentar) tidak perlu mengganggu user dengan alert,
+         * badge cukup berhenti update sampai polling berikutnya sukses. */
+    }
+}
+
+function setLiveMonitorEnabled(enabled) {
+    const btn = document.getElementById('toolbar-live-btn');
+    if (enabled) {
+        if (liveMonitorTimer) return;
+        liveMonitorTimer = setInterval(pollLiveValues, LIVE_MONITOR_INTERVAL_MS);
+        pollLiveValues();
+        btn.textContent = 'Live: ON';
+        btn.classList.add('is-live');
+    } else {
+        clearInterval(liveMonitorTimer);
+        liveMonitorTimer = null;
+        btn.textContent = 'Live: OFF';
+        btn.classList.remove('is-live');
+        /* Bersihkan semua badge supaya tidak menampilkan nilai basi dari
+         * polling terakhir sebelum dimatikan. */
+        document.querySelectorAll('.fbd-node-live').forEach(el => {
+            el.textContent = '';
+            el.classList.remove('fbd-node-live-on');
+        });
+    }
+}
+
+function toggleLiveMonitor() {
+    setLiveMonitorEnabled(liveMonitorTimer === null);
 }
 
 /* ---- Save / Load ---- */

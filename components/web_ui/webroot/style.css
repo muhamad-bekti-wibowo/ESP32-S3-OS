@@ -429,6 +429,18 @@ h3 {
     opacity: 0.88;
 }
 
+#toolbar-live-btn {
+    background: var(--bg);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+}
+
+#toolbar-live-btn.is-live {
+    background: #0a7a2f;
+    color: #fff;
+    border-color: #0a7a2f;
+}
+
 #toolbar-status {
     font-size: 12px;
     font-weight: 600;
@@ -553,6 +565,37 @@ body.network-page {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+/* Badge live monitor (lihat pollLiveValues() di app.js) - kosong/tidak
+ * kelihatan kalau live monitor mati, berisi nilai output node saat
+ * dinyalakan. position:static (bukan absolute) supaya tidak kena bug
+ * ".drawflow svg { position:absolute }" seperti icon sebelumnya - aman
+ * karena ini <span>, bukan <svg>, tapi disamakan gaya defensifnya. */
+.fbd-node-live {
+    position: static;
+    flex-shrink: 0;
+    font-size: 10.5px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-muted);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 2px 7px;
+    min-width: 8px;
+    text-align: center;
+    transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+
+.fbd-node-live:empty {
+    display: none;
+}
+
+.fbd-node-live.fbd-node-live-on {
+    color: #0a7a2f;
+    background: #e9f8ee;
+    border-color: #b8e6c5;
 }
 
 /* Segitiga penanda: diposisikan absolute relatif ke seluruh KARTU node
