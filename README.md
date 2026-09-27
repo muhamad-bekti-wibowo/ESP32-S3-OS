@@ -173,6 +173,12 @@ editor visual berbasis Drawflow yang di-hosting langsung dari ESP32-S3.
   dipertahankan sementara hanya untuk `/api/status`, akan dihapus setelah
   migrasi ke `fbd_graph` selesai penuh.
 
+## Tutorial pemakaian
+
+Panduan langkah demi langkah cara pakai web editor (flash, konek WiFi,
+buat rangkaian, GPIO/analog/PWM/servo real, I2C, live update, dst) ada
+di [docs/tutorials/00-daftar-isi.md](docs/tutorials/00-daftar-isi.md).
+
 ## Format program JSON
 
 Lihat [schema.md](schema.md) untuk spesifikasi lengkap (semua tipe node
