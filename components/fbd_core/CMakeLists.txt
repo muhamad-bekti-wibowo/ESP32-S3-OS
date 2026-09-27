@@ -1,4 +1,4 @@
 idf_component_register(
-    SRCS "fbd_value.c" "fbd_nodes.c"
+    SRCS "fbd_value.c" "fbd_nodes.c" "fbd_graph.c"
     INCLUDE_DIRS "include"
 )

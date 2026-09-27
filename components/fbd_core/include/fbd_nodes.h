@@ -16,10 +16,10 @@ fbd_value_t fbd_eval_nand(fbd_value_t a, fbd_value_t b);
 fbd_value_t fbd_eval_nor(fbd_value_t a, fbd_value_t b);
 
 typedef enum {
-    CMP_GT = 0, CMP_LT, CMP_EQ, CMP_NEQ, CMP_GTE, CMP_LTE
-} compare_op_t;
+    FBD_CMP_GT = 0, FBD_CMP_LT, FBD_CMP_EQ, FBD_CMP_NEQ, FBD_CMP_GTE, FBD_CMP_LTE
+} fbd_compare_op_t;
 
-fbd_value_t fbd_eval_compare(fbd_value_t a, fbd_value_t b, compare_op_t op);
+fbd_value_t fbd_eval_compare(fbd_value_t a, fbd_value_t b, fbd_compare_op_t op);
 
 /* ---- Data ---- */
 fbd_value_t fbd_eval_constant(fbd_value_t configured_value);
@@ -44,10 +44,10 @@ fbd_value_t fbd_var_get(const fbd_var_store_t *store, const char *name);
 
 /* ---- Math ---- */
 typedef enum {
-    OP_ADD = 0, OP_SUB, OP_MUL, OP_DIV
-} math_op_t;
+    FBD_OP_ADD = 0, FBD_OP_SUB, FBD_OP_MUL, FBD_OP_DIV
+} fbd_math_op_t;
 
-fbd_value_t fbd_eval_math(fbd_value_t a, fbd_value_t b, math_op_t op);
+fbd_value_t fbd_eval_math(fbd_value_t a, fbd_value_t b, fbd_math_op_t op);
 fbd_value_t fbd_eval_min(fbd_value_t a, fbd_value_t b);
 fbd_value_t fbd_eval_max(fbd_value_t a, fbd_value_t b);
 fbd_value_t fbd_eval_abs(fbd_value_t a);

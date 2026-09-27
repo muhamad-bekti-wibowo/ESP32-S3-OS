@@ -33,18 +33,18 @@ fbd_value_t fbd_eval_nor(fbd_value_t a, fbd_value_t b)
     return fbd_make_bool(!(fbd_to_bool(a) || fbd_to_bool(b)));
 }
 
-fbd_value_t fbd_eval_compare(fbd_value_t a, fbd_value_t b, compare_op_t op)
+fbd_value_t fbd_eval_compare(fbd_value_t a, fbd_value_t b, fbd_compare_op_t op)
 {
     float fa = fbd_to_float(a);
     float fb = fbd_to_float(b);
     bool result = false;
     switch (op) {
-        case CMP_GT:  result = fa > fb;  break;
-        case CMP_LT:  result = fa < fb;  break;
-        case CMP_EQ:  result = fa == fb; break;
-        case CMP_NEQ: result = fa != fb; break;
-        case CMP_GTE: result = fa >= fb; break;
-        case CMP_LTE: result = fa <= fb; break;
+        case FBD_CMP_GT:  result = fa > fb;  break;
+        case FBD_CMP_LT:  result = fa < fb;  break;
+        case FBD_CMP_EQ:  result = fa == fb; break;
+        case FBD_CMP_NEQ: result = fa != fb; break;
+        case FBD_CMP_GTE: result = fa >= fb; break;
+        case FBD_CMP_LTE: result = fa <= fb; break;
     }
     return fbd_make_bool(result);
 }
@@ -89,15 +89,15 @@ fbd_value_t fbd_var_get(const fbd_var_store_t *store, const char *name)
 
 /* ---- Math ---- */
 
-fbd_value_t fbd_eval_math(fbd_value_t a, fbd_value_t b, math_op_t op)
+fbd_value_t fbd_eval_math(fbd_value_t a, fbd_value_t b, fbd_math_op_t op)
 {
     float fa = fbd_to_float(a);
     float fb = fbd_to_float(b);
     switch (op) {
-        case OP_ADD: return fbd_make_float(fa + fb);
-        case OP_SUB: return fbd_make_float(fa - fb);
-        case OP_MUL: return fbd_make_float(fa * fb);
-        case OP_DIV: return fbd_make_float(fb == 0.0f ? 0.0f : fa / fb);
+        case FBD_OP_ADD: return fbd_make_float(fa + fb);
+        case FBD_OP_SUB: return fbd_make_float(fa - fb);
+        case FBD_OP_MUL: return fbd_make_float(fa * fb);
+        case FBD_OP_DIV: return fbd_make_float(fb == 0.0f ? 0.0f : fa / fb);
         default:     return fbd_make_float(0.0f);
     }
 }

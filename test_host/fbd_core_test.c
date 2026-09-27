@@ -38,10 +38,10 @@ static void test_logic_math_compare_chain(void)
     /* Constant(10) + Constant(5) = 15, lalu Compare(15 > 12) => true */
     fbd_value_t c1 = fbd_eval_constant(fbd_make_float(10.0f));
     fbd_value_t c2 = fbd_eval_constant(fbd_make_float(5.0f));
-    fbd_value_t sum = fbd_eval_math(c1, c2, OP_ADD);
+    fbd_value_t sum = fbd_eval_math(c1, c2, FBD_OP_ADD);
     CHECK(fbd_to_float(sum) == 15.0f, "Constant(10)+Constant(5) = 15");
 
-    fbd_value_t cmp = fbd_eval_compare(sum, fbd_make_float(12.0f), CMP_GT);
+    fbd_value_t cmp = fbd_eval_compare(sum, fbd_make_float(12.0f), FBD_CMP_GT);
     CHECK(fbd_to_bool(cmp) == true, "15 > 12 = true");
 
     fbd_value_t a = fbd_make_bool(true);

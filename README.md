@@ -13,12 +13,24 @@ editor visual berbasis Drawflow yang di-hosting langsung dari ESP32-S3.
 - **Selesai:** `FBDValue` tagged union (16 byte, tanpa alokasi heap) dan
   node Level 0 murni software — Logic (AND/OR/NOT/XOR/NAND/NOR/Compare),
   Data (Constant, Variable), Math (ADD/SUB/MUL/DIV/MIN/MAX/ABS/SCALE/
-  CLAMP), Timing (TON/TOF/TP/Counter). Lihat `components/fbd_core/` dan
-  `test_host/` (27 test lolos, dijalankan tanpa ESP32/idf.py).
-- **Berikutnya:** migrasi runtime ke graph ber-id dengan topological sort
-  dan dual-task FreeRTOS (Core 0 web server, Core 1 scan cycle), lalu
-  editor visual berbasis Drawflow, lalu I/O fisik Level 1 (ADC/PWM/servo)
-  dan Level 2 (I2C primitive, WiFi sebagai system variable).
+  CLAMP), Timing (TON/TOF/TP/Counter). Lihat `components/fbd_core/fbd_value.*`
+  dan `components/fbd_core/fbd_nodes.*`.
+- **Selesai:** runtime graph ber-id (`fbd_graph_t`) dengan topological sort
+  (Kahn's algorithm) dan scan cycle FreeRTOS terpisah pinned ke Core 1
+  (web server tetap di Core 0). Lihat `components/fbd_core/fbd_graph.*`
+  dan `main/main.c`. Endpoint web (`POST /api/program`) masih format v1
+  lama (`logic_engine`), belum terhubung ke `fbd_graph` — itu pekerjaan
+  tahap berikutnya (freeze schema JSON baru + endpoint save/load).
+- Semua node/graph di atas dites di `test_host/` (PC, tanpa ESP32/idf.py)
+  sebelum diintegrasikan ke firmware. Firmware sudah **build sukses**
+  untuk target esp32s3 (`idf.py build`), tapi **belum diverifikasi di
+  hardware fisik** (belum ada device tersambung saat commit ini dibuat) —
+  verifikasi Core 1 scan cycle tidak telat saat HTTP request lambat masih
+  perlu dilakukan sebelum tahap berikutnya dianggap benar-benar tuntas.
+- **Berikutnya:** freeze schema JSON baru + endpoint save/load yang
+  terhubung ke `fbd_graph`, lalu editor visual berbasis Drawflow, lalu
+  I/O fisik Level 1 (ADC/PWM/servo) dan Level 2 (I2C primitive, WiFi
+  sebagai system variable).
 
 ## Arsitektur (v1 — sedang bermigrasi ke runtime FBD)
 
@@ -63,8 +75,8 @@ susun block di editor, klik **Kirim ke ESP32**.
 
 ## Menjalankan test host (tanpa hardware)
 
-`components/fbd_core/` bisa dites di PC langsung, tanpa ESP32 dan tanpa
-`idf.py` — lihat [specs/01-fbdvalue-core.md](specs/01-fbdvalue-core.md).
+`components/fbd_core/` (FBDValue, node Level 0, dan graph/topological
+sort) bisa dites di PC langsung, tanpa ESP32 dan tanpa `idf.py`:
 
 ```powershell
 test_host\build_and_run.ps1
@@ -77,7 +89,7 @@ Xtensa/RISC-V ESP dan tidak bisa menghasilkan binary native PC.
 ## Roadmap
 
 - [x] Level 0 — Logic/Math/Timer/Data murni software (`fbd_core`)
-- [ ] Runtime graph dengan topological sort + dual-task FreeRTOS
+- [x] Runtime graph dengan topological sort + dual-task FreeRTOS
 - [ ] Schema JSON di-freeze + endpoint save/load
 - [ ] Editor visual Drawflow
 - [ ] Level 1 — I/O fisik (ADC/PWM/servo), simulated dulu baru real
