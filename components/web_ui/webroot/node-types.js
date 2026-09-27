@@ -4,20 +4,31 @@
  *
  * Field:
  *   inputs / outputs: jumlah port.
+ *   help: penjelasan singkat node ini, ditampilkan live di panel
+ *     Properties saat node diklik di canvas (lihat renderProperties()
+ *     di app.js) - ini adalah "tutorial di dalam web", bukan dokumen
+ *     terpisah.
  *   fields: daftar field di params, dipakai untuk generate form HTML dan
  *     untuk baca/tulis nilai saat convert ke/dari schema.md.
  *     { key, label, type: 'number'|'text'|'select'|'checkbox', options?, default }
  */
 const NODE_TYPES = {
     // ---- Logic ----
-    and:  { label: 'AND',  inputs: 2, outputs: 1, fields: [] },
-    or:   { label: 'OR',   inputs: 2, outputs: 1, fields: [] },
-    not:  { label: 'NOT',  inputs: 1, outputs: 1, fields: [] },
-    xor:  { label: 'XOR',  inputs: 2, outputs: 1, fields: [] },
-    nand: { label: 'NAND', inputs: 2, outputs: 1, fields: [] },
-    nor:  { label: 'NOR',  inputs: 2, outputs: 1, fields: [] },
+    and:  { label: 'AND',  inputs: 2, outputs: 1, fields: [],
+        help: 'Output true hanya kalau kedua input true.' },
+    or:   { label: 'OR',   inputs: 2, outputs: 1, fields: [],
+        help: 'Output true kalau salah satu input true.' },
+    not:  { label: 'NOT',  inputs: 1, outputs: 1, fields: [],
+        help: 'Membalik nilai input (true jadi false, sebaliknya).' },
+    xor:  { label: 'XOR',  inputs: 2, outputs: 1, fields: [],
+        help: 'Output true kalau kedua input berbeda.' },
+    nand: { label: 'NAND', inputs: 2, outputs: 1, fields: [],
+        help: 'Kebalikan dari AND: output false hanya kalau kedua input true.' },
+    nor:  { label: 'NOR',  inputs: 2, outputs: 1, fields: [],
+        help: 'Kebalikan dari OR: output true hanya kalau kedua input false.' },
     compare: {
         label: 'Compare', inputs: 2, outputs: 1,
+        help: 'Membandingkan in0 dengan in1 sesuai operator Op, output bool.',
         fields: [
             { key: 'op', label: 'Op', type: 'select',
               options: ['gt', 'lt', 'eq', 'neq', 'gte', 'lte'], default: 'gt' },
@@ -27,6 +38,7 @@ const NODE_TYPES = {
     // ---- Data ----
     const: {
         label: 'Constant', inputs: 0, outputs: 1,
+        help: 'Nilai tetap yang bisa disambungkan ke node lain. Tidak punya input.',
         fields: [
             { key: 'datatype', label: 'Type', type: 'select',
               options: ['bool', 'int32', 'float'], default: 'float' },
@@ -35,26 +47,33 @@ const NODE_TYPES = {
     },
     var_get: {
         label: 'Var Get', inputs: 0, outputs: 1,
+        help: 'Baca nilai dari storage key-value global bernama Name.',
         fields: [{ key: 'name', label: 'Name', type: 'text', default: 'var1' }],
     },
     var_set: {
         label: 'Var Set', inputs: 1, outputs: 1,
+        help: 'Tulis nilai input ke storage global bernama Name, lalu pass-through nilainya ke output.',
         fields: [{ key: 'name', label: 'Name', type: 'text', default: 'var1' }],
     },
 
     // ---- Math ----
     math: {
         label: 'Math', inputs: 2, outputs: 1,
+        help: 'Operasi aritmatika sederhana antara in0 dan in1 sesuai Op.',
         fields: [
             { key: 'op', label: 'Op', type: 'select',
               options: ['add', 'sub', 'mul', 'div'], default: 'add' },
         ],
     },
-    min:  { label: 'Min', inputs: 2, outputs: 1, fields: [] },
-    max:  { label: 'Max', inputs: 2, outputs: 1, fields: [] },
-    abs:  { label: 'Abs', inputs: 1, outputs: 1, fields: [] },
+    min:  { label: 'Min', inputs: 2, outputs: 1, fields: [],
+        help: 'Output nilai terkecil antara in0 dan in1.' },
+    max:  { label: 'Max', inputs: 2, outputs: 1, fields: [],
+        help: 'Output nilai terbesar antara in0 dan in1.' },
+    abs:  { label: 'Abs', inputs: 1, outputs: 1, fields: [],
+        help: 'Output nilai absolut (selalu positif) dari input.' },
     scale: {
         label: 'Scale', inputs: 1, outputs: 1,
+        help: 'Pemetaan linear dari rentang In min-In max ke rentang Out min-Out max. Cocok untuk konversi raw ADC ke satuan nyata.',
         fields: [
             { key: 'in_min', label: 'In min', type: 'number', default: 0 },
             { key: 'in_max', label: 'In max', type: 'number', default: 4095 },
@@ -64,6 +83,7 @@ const NODE_TYPES = {
     },
     clamp: {
         label: 'Clamp', inputs: 1, outputs: 1,
+        help: 'Membatasi nilai input agar tidak kurang dari Min atau lebih dari Max.',
         fields: [
             { key: 'min', label: 'Min', type: 'number', default: 0 },
             { key: 'max', label: 'Max', type: 'number', default: 100 },
@@ -73,24 +93,29 @@ const NODE_TYPES = {
     // ---- Timing ----
     ton: {
         label: 'TON', inputs: 1, outputs: 1,
+        help: 'Timer ON-delay: output jadi true hanya setelah input true selama Delay (ms) terus-menerus.',
         fields: [{ key: 'delay_ms', label: 'Delay (ms)', type: 'number', default: 1000 }],
     },
     tof: {
         label: 'TOF', inputs: 1, outputs: 1,
+        help: 'Timer OFF-delay: output tetap true selama Delay (ms) setelah input berubah jadi false.',
         fields: [{ key: 'delay_ms', label: 'Delay (ms)', type: 'number', default: 1000 }],
     },
     tp: {
         label: 'TP', inputs: 1, outputs: 1,
+        help: 'Pulse timer: setiap input jadi true, output true selama Pulse (ms) lalu otomatis false lagi.',
         fields: [{ key: 'pulse_ms', label: 'Pulse (ms)', type: 'number', default: 500 }],
     },
     ctu: {
         label: 'Counter (CTU)', inputs: 2, outputs: 1,
+        help: 'Counter naik: port clk bertambah 1 tiap transisi false->true, port reset mengembalikan ke 0. Output true kalau hitungan >= Preset.',
         fields: [{ key: 'preset', label: 'Preset', type: 'number', default: 3 }],
     },
 
     // ---- I/O digital (Level 1) ----
     digital_input: {
         label: 'Digital In', inputs: 0, outputs: 1,
+        help: 'Baca level GPIO digital. HW Mode "simulated" = nilai diatur manual (tidak menyentuh GPIO fisik); "real" = baca pin sungguhan. Pin berbahaya (strapping/USB-JTAG/PSRAM) ditolak saat HW Mode real.',
         fields: [
             { key: 'pin', label: 'Pin', type: 'number', default: 0 },
             { key: 'mode', label: 'Mode', type: 'select',
@@ -102,6 +127,7 @@ const NODE_TYPES = {
     },
     digital_output: {
         label: 'Digital Out', inputs: 1, outputs: 0,
+        help: 'Menyalakan/mematikan GPIO digital sesuai nilai input. HW Mode "simulated" tidak berefek fisik; "real" mengendalikan pin sungguhan. Pin berbahaya ditolak saat HW Mode real.',
         fields: [
             { key: 'pin', label: 'Pin', type: 'number', default: 0 },
             { key: 'invert', label: 'Invert', type: 'checkbox', default: false },
@@ -113,6 +139,7 @@ const NODE_TYPES = {
     // ---- I/O analog & PWM (Level 1) ----
     analog_input: {
         label: 'Analog In', inputs: 0, outputs: 1,
+        help: 'Baca ADC. HW Mode "simulated" = pakai slider Sim Value (untuk tes tanpa hardware); "real" = baca ADC sungguhan (Sim Value diabaikan).',
         fields: [
             { key: 'pin', label: 'Pin', type: 'number', default: 4 },
             { key: 'resolution', label: 'Resolution (bit)', type: 'number', default: 12 },
@@ -124,6 +151,7 @@ const NODE_TYPES = {
     },
     pwm_output: {
         label: 'PWM Out', inputs: 1, outputs: 0,
+        help: 'Output PWM (misal dimmer LED). Input node adalah duty cycle 0-100 (persen), bukan raw register.',
         fields: [
             { key: 'pin', label: 'Pin', type: 'number', default: 5 },
             { key: 'frequency', label: 'Frequency (Hz)', type: 'number', default: 1000 },
@@ -134,6 +162,7 @@ const NODE_TYPES = {
     },
     servo: {
         label: 'Servo', inputs: 1, outputs: 0,
+        help: 'Menggerakkan servo. Input node adalah sudut 0-180 derajat (otomatis di-clamp kalau di luar rentang).',
         fields: [
             { key: 'pin', label: 'Pin', type: 'number', default: 18 },
             { key: 'min_us', label: 'Min us', type: 'number', default: 500 },
@@ -146,6 +175,7 @@ const NODE_TYPES = {
     // ---- I2C primitive (Level 2, register-level, BUKAN driver sensor) ----
     i2c_read_reg: {
         label: 'I2C Read Reg', inputs: 0, outputs: 2,
+        help: 'Baca register I2C mentah (bukan driver sensor spesifik). Output 0 = raw bytes, output 1 = error (true kalau NACK/timeout). Timeout selalu pendek (8ms), tidak pernah menahan scan cycle.',
         fields: [
             { key: 'bus', label: 'Bus', type: 'number', default: 0 },
             { key: 'address', label: 'Address (7-bit)', type: 'number', default: 0x27 },
@@ -155,6 +185,7 @@ const NODE_TYPES = {
     },
     i2c_write_reg: {
         label: 'I2C Write Reg', inputs: 0, outputs: 1,
+        help: 'Tulis register I2C mentah. Output = sukses (true kalau ACK diterima). Isi Data sebagai daftar byte dipisah koma, misal "16,32".',
         fields: [
             { key: 'bus', label: 'Bus', type: 'number', default: 0 },
             { key: 'address', label: 'Address (7-bit)', type: 'number', default: 0x27 },
@@ -166,6 +197,7 @@ const NODE_TYPES = {
     // ---- System variable read-only (WiFi, dst - BUKAN dikonfigurasi di sini) ----
     sys_var_get: {
         label: 'Sys Var Get', inputs: 0, outputs: 1,
+        help: 'Baca variabel status sistem read-only (mirip %SM PLC). Konfigurasi WiFi sendiri dilakukan di tab System > Network, bukan di sini.',
         fields: [
             { key: 'name', label: 'Name', type: 'select',
               options: ['SYS.WIFI_CONNECTED', 'SYS.WIFI_RSSI'], default: 'SYS.WIFI_CONNECTED' },

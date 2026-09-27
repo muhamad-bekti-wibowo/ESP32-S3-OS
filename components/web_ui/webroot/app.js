@@ -103,6 +103,9 @@ function renderProperties(dfId) {
     const def = NODE_TYPES[nodeData.data.fbdType];
 
     let html = `<div class="properties-node-type">${def.label}</div>`;
+    if (def.help) {
+        html += `<div class="properties-help">${def.help}</div>`;
+    }
     if (def.fields.length === 0) {
         html += '<p class="properties-empty">Node ini tidak punya parameter</p>';
     } else {
