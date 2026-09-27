@@ -22,11 +22,13 @@ editor visual berbasis Drawflow yang di-hosting langsung dari ESP32-S3.
   lama (`logic_engine`), belum terhubung ke `fbd_graph` — itu pekerjaan
   tahap berikutnya (freeze schema JSON baru + endpoint save/load).
 - Semua node/graph di atas dites di `test_host/` (PC, tanpa ESP32/idf.py)
-  sebelum diintegrasikan ke firmware. Firmware sudah **build sukses**
-  untuk target esp32s3 (`idf.py build`), tapi **belum diverifikasi di
-  hardware fisik** (belum ada device tersambung saat commit ini dibuat) —
-  verifikasi Core 1 scan cycle tidak telat saat HTTP request lambat masih
-  perlu dilakukan sebelum tahap berikutnya dianggap benar-benar tuntas.
+  sebelum diintegrasikan ke firmware. **Diverifikasi di hardware fisik
+  (ESP32-S3 nyata via `idf.py flash monitor`):** `app_main` jalan di
+  Core 0, `fbd_scan_task` jalan di Core 1, TON delay 2000ms transisi
+  output tepat waktu (0 di t=1-2s, jadi 1 di t=3s), dan scan cycle log
+  tetap konsisten setiap ~1000ms tanpa gap saat endpoint HTTP disengaja
+  delay 2 detik — membuktikan Core 0 (web server) tidak menahan Core 1
+  (scan cycle).
 - **Berikutnya:** freeze schema JSON baru + endpoint save/load yang
   terhubung ke `fbd_graph`, lalu editor visual berbasis Drawflow, lalu
   I/O fisik Level 1 (ADC/PWM/servo) dan Level 2 (I2C primitive, WiFi

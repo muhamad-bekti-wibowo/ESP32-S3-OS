@@ -32,6 +32,22 @@ Semua perubahan penting proyek ini dicatat di file ini.
 - `main/CMakeLists.txt`: tambah `esp_timer` ke `REQUIRES` (dipakai
   `esp_timer_get_time()` di scan task), sebelumnya gagal compile dengan
   `fatal error: esp_timer.h: No such file or directory`.
+- `main.c`: node `n2` (TON) di graph default tidak pernah diberi input
+  (`inputs[0]` tetap `FBD_EMPTY` sejak `fbd_graph_init` yang memset nol),
+  sehingga `digital_output` selalu false — timer tidak pernah start.
+  Ditemukan lewat verifikasi hardware nyata (log serial menunjukkan
+  `digital_output=0` terus-menerus melewati `delay_ms`), tidak ketahuan
+  dari test host karena test host memberi input secara eksplisit.
+
+### Verified (hardware ESP32-S3 nyata, via `idf.py -p COM4 flash monitor`)
+- `app_main` jalan di Core 0, `fbd_scan_task` jalan di Core 1 (dibuktikan
+  lewat `xPortGetCoreID()` di log boot).
+- TON `delay_ms=2000`: `digital_output` tetap 0 di t=1018ms/2018ms, lalu
+  jadi 1 di t=3018ms dan seterusnya — transisi timing benar.
+- Endpoint HTTP disengaja `vTaskDelay(2000)` (`/api/debug_slow`, dihapus
+  lagi setelah tes) memakan 2.06 detik nyata, sementara log scan cycle
+  tetap konsisten setiap ~1000ms tanpa gap selama periode itu — Core 0
+  (web server) tidak menahan Core 1 (scan cycle) sama sekali.
 
 ### Added (v1, sebelum migrasi ke runtime FBD)
 - Struktur awal proyek ESP-IDF untuk ESP32-S3 (`esp32-web-logic`).

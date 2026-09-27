@@ -54,11 +54,13 @@ static void fbd_scan_task(void *pvParameters)
     for (;;) {
         uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
 
-        /* Simulasi input sederhana: digital_input selalu true, supaya
-         * digital_output ikut menyala setelah delay_ms TON lewat. Diganti
-         * dengan pembacaan GPIO fisik di spec 05 (Level 1). */
+        /* Simulasi input sederhana: digital_input & trigger TON selalu
+         * true, supaya digital_output ikut menyala setelah delay_ms TON
+         * lewat. Diganti dengan pembacaan GPIO fisik di spec 05 (Level 1). */
         size_t n1_idx = fbd_graph_find_node(graph, "n1");
+        size_t n2_idx = fbd_graph_find_node(graph, "n2");
         graph->nodes[n1_idx].inputs[0] = fbd_make_bool(true);
+        graph->nodes[n2_idx].inputs[0] = fbd_make_bool(true);
 
         fbd_graph_execute_cycle(graph, now_ms);
 
