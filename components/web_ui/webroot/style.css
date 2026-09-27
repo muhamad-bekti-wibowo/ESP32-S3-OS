@@ -597,6 +597,25 @@ body.network-page {
     border-color: var(--accent);
 }
 
+/* BUG Drawflow (dibuktikan lewat inspeksi headless Puppeteer, bukan
+ * dugaan): tiap kali koneksi baru dibuat (drag mouse ATAU import),
+ * elemen <svg class="connection"> yang menampung path-nya sendiri
+ * diberi inline style "top" oleh Drawflow yang TIDAK konsisten dengan
+ * sistem koordinat yang dipakai untuk menghitung isi atribut "d" path
+ * (path dihitung relatif precanvas/origin 0,0, tapi svg containernya
+ * sendiri digeser turun beberapa puluh/ratus px secara acak - konstan
+ * per-canvas, tidak berkaitan dengan posisi node manapun). Efeknya
+ * kabel selalu "ngambang" turun dari port sungguhan sejauh offset svg
+ * itu, walau perhitungan path itu sendiri sudah benar. Diverifikasi:
+ * memaksa svg.connection { top:0; left:0 } membuat path pas 100% di
+ * kedua port tanpa perubahan lain apa pun. !important wajib karena
+ * Drawflow set ini lewat inline style (specificity lebih tinggi dari
+ * class biasa). */
+.drawflow svg.connection {
+    top: 0 !important;
+    left: 0 !important;
+}
+
 /* Wire koneksi - selaraskan warna dengan accent oranye (default library
  * steelblue kurang cocok dengan palet oranye/off-white ini). */
 .connection .main-path {

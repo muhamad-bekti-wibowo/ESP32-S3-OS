@@ -318,19 +318,6 @@ function initEditor() {
     editor.on('nodeRemoved', (dfId) => {
         if (String(selectedDfId) === String(dfId)) selectNode(null);
     });
-    /* Drawflow menghitung posisi awal titik ujung kabel dari getBoundingClientRect()
-     * elemen port SAAT link baru disambung - kalau tinggi kartu node beda dari
-     * asumsi bawaan library (kartu kita punya padding-bottom ekstra utk marker
-     * segitiga, tidak ada di Drawflow default), path yang digambar pertama kali
-     * sudah salah sejak awal, BUKAN cuma soal data lama/stale. Refresh posisi
-     * kedua ujung (from & to) tiap kali koneksi baru selesai dibuat - baik lewat
-     * drag manual mouse maupun lewat import(). */
-    editor.on('connectionCreated', (info) => {
-        requestAnimationFrame(() => {
-            editor.updateConnectionNodes(`node-${info.output_id}`);
-            editor.updateConnectionNodes(`node-${info.input_id}`);
-        });
-    });
 
     /* Simpan input field panel properties -> data node saat berubah,
      * supaya editor.export() membawa params terbaru. command-list punya
@@ -473,27 +460,6 @@ async function saveProgram() {
     }
 }
 
-/* Drawflow menghitung ulang path SVG kabel koneksi HANYA saat node
- * digeser (drag) - path yang di-import lewat editor.import() memakai
- * posisi node apa adanya, tapi tinggi/lebar kartu bisa berbeda dari saat
- * link itu terakhir disimpan (mis. setelah update CSS node - padding,
- * marker, dst berubah). Hasilnya kabel terlihat "melenceng" dari
- * lingkaran port sampai node digeser manual sekali. Dipanggil sekali per
- * node setelah import supaya user tidak perlu drag manual. */
-function refreshAllConnectionPaths() {
-    /* requestAnimationFrame supaya browser SUDAH commit layout (ukuran
-     * kartu node hasil CSS terbaru) sebelum Drawflow membaca posisi
-     * elemen buat menggambar ulang path - dipanggil sinkron langsung
-     * setelah import() kadang masih baca layout LAMA (browser belum
-     * sempat reflow), path yang dihasilkan tetap salah walau fungsi ini
-     * sudah dipanggil. */
-    requestAnimationFrame(() => {
-        Object.keys(editor.drawflow.drawflow.Home.data).forEach(dfId => {
-            editor.updateConnectionNodes(`node-${dfId}`);
-        });
-    });
-}
-
 async function loadProgram() {
     try {
         const res = await fetch('/api/program');
@@ -505,7 +471,6 @@ async function loadProgram() {
         const drawflowData = schemaToDrawflow(schema);
         editor.clear();
         editor.import(drawflowData);
-        refreshAllConnectionPaths();
         selectNode(null);
         setStatus('Load sukses');
     } catch (err) {
