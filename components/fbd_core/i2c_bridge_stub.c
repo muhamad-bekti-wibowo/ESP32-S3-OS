@@ -20,3 +20,8 @@ bool i2c_bridge_write_reg(int bus, uint8_t address, uint8_t reg,
     (void)bus; (void)address; (void)reg; (void)data; (void)length;
     return false;
 }
+
+void i2c_bridge_delay_us(uint32_t us)
+{
+    (void)us;
+}

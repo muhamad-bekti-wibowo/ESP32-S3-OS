@@ -75,6 +75,41 @@ static void test_i2c_write_reg_error(void)
           "i2c_write_reg gagal (stub NACK) -> outputs[0] = false (bukan crash)");
 }
 
+static void test_i2c_write_burst_error(void)
+{
+    fbd_graph_t g;
+    fbd_graph_init(&g);
+
+    fbd_node_t *b = fbd_graph_add_node(&g, "b1", FBD_NODE_I2C_WRITE_BURST);
+    b->params.i2c_bus = 0;
+    b->params.i2c_address = 0x27;
+    b->params.i2c_burst_delay_us = 50;
+    b->params.i2c_burst_cmd_count = 3;
+    b->params.i2c_burst_cmds[0].reg = 0x00;
+    b->params.i2c_burst_cmds[0].data[0] = 0x38;
+    b->params.i2c_burst_cmds[0].data_len = 1;
+    b->params.i2c_burst_cmds[1].reg = 0x00;
+    b->params.i2c_burst_cmds[1].data[0] = 0x0C;
+    b->params.i2c_burst_cmds[1].data_len = 1;
+    b->params.i2c_burst_cmds[2].reg = 0x00;
+    b->params.i2c_burst_cmds[2].data[0] = 0x01;
+    b->params.i2c_burst_cmds[2].data_len = 1;
+
+    CHECK(fbd_graph_compile(&g), "compile() sukses untuk graph dengan i2c_write_burst");
+    fbd_graph_execute_cycle(&g, 0);
+
+    size_t b_idx = fbd_graph_find_node(&g, "b1");
+    CHECK(fbd_to_bool(g.nodes[b_idx].outputs[0]) == false,
+          "i2c_write_burst: command pertama gagal (stub NACK) -> outputs[0] = false, tidak crash");
+
+    /* Jalankan beberapa cycle lagi - membuktikan tidak hang walau ada delay antar command. */
+    for (int i = 0; i < 3; ++i) {
+        fbd_graph_execute_cycle(&g, (uint32_t)(i * 20));
+    }
+    CHECK(fbd_to_bool(g.nodes[b_idx].outputs[0]) == false,
+          "i2c_write_burst tetap konsisten error=false setelah beberapa cycle (tidak hang)");
+}
+
 /* ---- sys_var_get (6b) ---- */
 
 static fbd_value_t test_sys_var_provider(const char *name)
@@ -156,6 +191,7 @@ int main(void)
 {
     test_i2c_read_reg_error_does_not_block_scan_cycle();
     test_i2c_write_reg_error();
+    test_i2c_write_burst_error();
     test_sys_var_get_no_provider_registered();
     test_sys_var_get_wifi_rssi_compare();
     test_sys_var_get_unknown_name();

@@ -4,6 +4,7 @@
 #include "i2c_bridge.h"
 #include "driver/i2c_master.h"
 #include "esp_log.h"
+#include "esp_rom_sys.h"
 #include <string.h>
 
 static const char *TAG = "i2c_bridge";
@@ -118,4 +119,9 @@ bool i2c_bridge_write_reg(int bus, uint8_t address, uint8_t reg,
 
     esp_err_t err = i2c_master_transmit(handle, buf, length + 1, I2C_BRIDGE_TIMEOUT_MS);
     return err == ESP_OK;
+}
+
+void i2c_bridge_delay_us(uint32_t us)
+{
+    esp_rom_delay_us(us);
 }

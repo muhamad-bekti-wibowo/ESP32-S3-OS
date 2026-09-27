@@ -21,6 +21,7 @@ function setStatus(msg, isError) {
 function buildNodeHtml(type) {
     const def = NODE_TYPES[type];
     return `<div class="fbd-node-title">
+        ${svgIcon(def.icon, 'fbd-node-icon')}
         <span class="fbd-node-label">${def.label}</span>
         <span class="fbd-node-marker" aria-hidden="true"></span>
     </div>`;
@@ -29,7 +30,10 @@ function buildNodeHtml(type) {
 function defaultParams(type) {
     const def = NODE_TYPES[type];
     const params = {};
-    def.fields.forEach(f => { params[f.key] = f.default; });
+    /* structuredClone/JSON roundtrip supaya array/object default (csv-bytes,
+     * command-list) tidak dishare-reference antar node yang sama type-nya -
+     * tanpa ini, edit command di satu node bisa "bocor" ke node lain. */
+    def.fields.forEach(f => { params[f.key] = JSON.parse(JSON.stringify(f.default)); });
     return params;
 }
 
@@ -43,16 +47,69 @@ function addNodeToCanvas(type, x, y) {
     );
 }
 
+/* Palette dikelompokkan per category (lihat CATEGORY_LABELS di
+ * node-types.js), tiap kelompok bisa dibuka/tutup (klik header), dan
+ * ada kotak pencarian di atas yang memfilter berdasarkan label node -
+ * kelompok yang tidak punya hasil otomatis disembunyikan, kelompok yang
+ * punya hasil otomatis dibuka supaya hasil pencarian langsung terlihat. */
+function groupNodeTypesByCategory() {
+    const groups = {};
+    Object.keys(NODE_TYPES).forEach(type => {
+        const cat = NODE_TYPES[type].category || 'other';
+        if (!groups[cat]) groups[cat] = [];
+        groups[cat].push(type);
+    });
+    return groups;
+}
+
 function buildPalette() {
     const list = document.getElementById('palette-list');
-    Object.keys(NODE_TYPES).forEach(type => {
-        const btn = document.createElement('button');
-        btn.textContent = NODE_TYPES[type].label;
-        btn.onclick = () => {
-            const rect = editor.precanvas.getBoundingClientRect();
-            addNodeToCanvas(type, 100 - rect.x / editor.zoom, 100 - rect.y / editor.zoom);
-        };
-        list.appendChild(btn);
+    const groups = groupNodeTypesByCategory();
+    list.innerHTML = '';
+
+    Object.keys(groups).forEach(cat => {
+        const section = document.createElement('div');
+        section.className = 'palette-group';
+        section.dataset.category = cat;
+
+        const header = document.createElement('button');
+        header.type = 'button';
+        header.className = 'palette-group-header';
+        header.innerHTML = `<span class="palette-group-caret">&#9656;</span><span>${CATEGORY_LABELS[cat] || cat}</span>`;
+        header.onclick = () => section.classList.toggle('collapsed');
+        section.appendChild(header);
+
+        const body = document.createElement('div');
+        body.className = 'palette-group-body';
+        groups[cat].forEach(type => {
+            const def = NODE_TYPES[type];
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'palette-item';
+            btn.dataset.label = def.label.toLowerCase();
+            btn.innerHTML = `${svgIcon(def.icon, 'palette-item-icon')}<span>${def.label}</span>`;
+            btn.onclick = () => {
+                const rect = editor.precanvas.getBoundingClientRect();
+                addNodeToCanvas(type, 100 - rect.x / editor.zoom, 100 - rect.y / editor.zoom);
+            };
+            body.appendChild(btn);
+        });
+        section.appendChild(body);
+        list.appendChild(section);
+    });
+}
+
+function filterPalette(query) {
+    const q = query.trim().toLowerCase();
+    document.querySelectorAll('.palette-group').forEach(section => {
+        let anyMatch = false;
+        section.querySelectorAll('.palette-item').forEach(item => {
+            const matches = q === '' || item.dataset.label.includes(q);
+            item.style.display = matches ? '' : 'none';
+            if (matches) anyMatch = true;
+        });
+        section.style.display = anyMatch ? '' : 'none';
+        if (q !== '' && anyMatch) section.classList.remove('collapsed');
     });
 }
 
@@ -89,7 +146,88 @@ function fieldInputHtml(field, value) {
         const csv = Array.isArray(value) ? value.join(',') : value;
         return `<input type="text" id="${id}" df-field="${field.key}" df-field-type="csv-bytes" value="${csv}">`;
     }
+    if (field.type === 'command-list') {
+        /* i2c_write_burst.commands: daftar {register, data[]} yang bisa
+         * ditambah/dihapus baris - dirender manual (bukan <input> tunggal),
+         * lihat renderCommandListField() + wireCommandListEvents(). */
+        return renderCommandListField(id, field, Array.isArray(value) ? value : []);
+    }
     return `<input type="text" id="${id}" df-field="${field.key}" value="${value}">`;
+}
+
+function renderCommandListField(id, field, commands) {
+    const rows = commands.map((cmd, i) => {
+        const dataCsv = Array.isArray(cmd.data) ? cmd.data.join(',') : '';
+        return `<div class="command-row" data-index="${i}">
+            <span class="command-row-num">#${i + 1}</span>
+            <input type="number" class="command-reg" value="${cmd.register || 0}" placeholder="reg">
+            <input type="text" class="command-data" value="${dataCsv}" placeholder="data csv, mis. 16,32">
+            <button type="button" class="command-row-remove" title="Hapus command ini">&times;</button>
+        </div>`;
+    }).join('');
+    return `<div class="command-list" id="${id}" df-field="${field.key}" df-field-type="command-list">
+        ${rows}
+        <button type="button" class="command-list-add">+ Tambah command</button>
+    </div>`;
+}
+
+/* Baca ulang seluruh command-list dari DOM (dipanggil setiap ada
+ * perubahan - tambah/hapus baris atau edit input) -> array
+ * [{register, data}] yang cocok dengan schema.md i2c_write_burst. */
+function readCommandListFromDom(container) {
+    const commands = [];
+    container.querySelectorAll('.command-row').forEach(row => {
+        const reg = parseInt(row.querySelector('.command-reg').value, 10) || 0;
+        const data = row.querySelector('.command-data').value
+            .split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
+        commands.push({ register: reg, data: data.length ? data : [0] });
+    });
+    return commands;
+}
+
+function commitCommandListField(container) {
+    if (selectedDfId === null) return;
+    const fieldKey = container.getAttribute('df-field');
+    const nodeData = editor.getNodeFromId(selectedDfId);
+    nodeData.data.params[fieldKey] = readCommandListFromDom(container);
+    editor.updateNodeDataFromId(selectedDfId, nodeData.data);
+}
+
+/* Event delegation untuk command-list: tombol +/x dan edit input dalam
+ * baris - dipasang sekali di panel Properties (lihat initEditor()),
+ * bukan per-field, supaya tetap bekerja walau field di-render ulang. */
+function wireCommandListEvents(panel) {
+    panel.addEventListener('click', (e) => {
+        const container = e.target.closest('.command-list');
+        if (!container) return;
+        if (e.target.classList.contains('command-list-add')) {
+            const addBtn = e.target;
+            const row = document.createElement('div');
+            const index = container.querySelectorAll('.command-row').length;
+            row.className = 'command-row';
+            row.dataset.index = String(index);
+            row.innerHTML = `<span class="command-row-num">#${index + 1}</span>
+                <input type="number" class="command-reg" value="0" placeholder="reg">
+                <input type="text" class="command-data" value="" placeholder="data csv, mis. 16,32">
+                <button type="button" class="command-row-remove" title="Hapus command ini">&times;</button>`;
+            container.insertBefore(row, addBtn);
+            commitCommandListField(container);
+        } else if (e.target.classList.contains('command-row-remove')) {
+            e.target.closest('.command-row').remove();
+            container.querySelectorAll('.command-row').forEach((row, i) => {
+                row.dataset.index = String(i);
+                row.querySelector('.command-row-num').textContent = `#${i + 1}`;
+            });
+            commitCommandListField(container);
+        }
+    });
+    panel.addEventListener('input', (e) => {
+        const container = e.target.closest('.command-list');
+        if (!container) return;
+        if (e.target.classList.contains('command-reg') || e.target.classList.contains('command-data')) {
+            commitCommandListField(container);
+        }
+    });
 }
 
 function renderProperties(dfId) {
@@ -102,7 +240,12 @@ function renderProperties(dfId) {
     const nodeData = editor.getNodeFromId(dfId);
     const def = NODE_TYPES[nodeData.data.fbdType];
 
-    let html = `<div class="properties-node-type">${def.label}</div>`;
+    let html = `<div class="properties-node-header">
+        <div class="properties-node-type">${def.label}</div>
+        <button type="button" id="properties-delete-btn" class="properties-delete-btn" title="Hapus node ini">
+            ${svgIcon('trash', '')} Hapus
+        </button>
+    </div>`;
     if (def.help) {
         html += `<div class="properties-help">${def.help}</div>`;
     }
@@ -118,6 +261,14 @@ function renderProperties(dfId) {
         });
     }
     panel.innerHTML = html;
+
+    const deleteBtn = document.getElementById('properties-delete-btn');
+    if (deleteBtn) {
+        deleteBtn.onclick = () => {
+            editor.removeNodeId(`node-${dfId}`);
+            selectNode(null);
+        };
+    }
 }
 
 function selectNode(dfId) {
@@ -148,10 +299,13 @@ function initEditor() {
     });
 
     /* Simpan input field panel properties -> data node saat berubah,
-     * supaya editor.export() membawa params terbaru. */
-    document.getElementById('properties-body').addEventListener('input', (e) => {
+     * supaya editor.export() membawa params terbaru. command-list punya
+     * jalur commit sendiri (readCommandListFromDom), dilewati di sini. */
+    const propertiesBody = document.getElementById('properties-body');
+    propertiesBody.addEventListener('input', (e) => {
         const fieldKey = e.target.getAttribute('df-field');
         if (!fieldKey || selectedDfId === null) return;
+        if (e.target.getAttribute('df-field-type') === 'command-list') return;
         const nodeData = editor.getNodeFromId(selectedDfId);
         let value = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
         if (e.target.type === 'number' || e.target.type === 'range') value = parseFloat(value);
@@ -160,6 +314,11 @@ function initEditor() {
         }
         nodeData.data.params[fieldKey] = value;
         editor.updateNodeDataFromId(selectedDfId, nodeData.data);
+    });
+    wireCommandListEvents(propertiesBody);
+
+    document.getElementById('palette-search').addEventListener('input', (e) => {
+        filterPalette(e.target.value);
     });
 
     buildPalette();

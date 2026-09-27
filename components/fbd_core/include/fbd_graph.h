@@ -44,6 +44,7 @@ typedef enum {
     FBD_NODE_SERVO,
     FBD_NODE_I2C_READ_REG,
     FBD_NODE_I2C_WRITE_REG,
+    FBD_NODE_I2C_WRITE_BURST,
     FBD_NODE_SYS_VAR_GET,
     FBD_NODE_TYPE_COUNT
 } fbd_node_type_t;
@@ -61,6 +62,25 @@ typedef enum {
     FBD_HW_SIMULATED = 0,
     FBD_HW_REAL
 } fbd_hw_mode_t;
+
+/* FBD_NODE_I2C_WRITE_BURST: kirim beberapa command register write
+ * berurutan dalam SATU scan cycle - dipakai untuk device I2C yang butuh
+ * command sequence (mis. LCD1602 lewat backpack PCF8574: kirim nibble
+ * demi nibble dengan toggle bit E). TETAP primitive generik (bukan
+ * driver LCD) - siapa pun bisa susun sequence apa pun lewat commands[]
+ * ini, cocok untuk periferal I2C lain juga, tidak spesifik LCD.
+ * Dibatasi statis (tanpa alokasi dinamis, konsisten dgn fbd_graph_t
+ * lain): FBD_I2C_BURST_MAX_CMDS command, tiap command maks
+ * FBD_I2C_BURST_MAX_DATA byte data. Kalau butuh command lebih banyak,
+ * sambung beberapa node i2c_write_burst berurutan di canvas. */
+#define FBD_I2C_BURST_MAX_CMDS 8
+#define FBD_I2C_BURST_MAX_DATA 4
+
+typedef struct {
+    uint8_t reg;
+    uint8_t data[FBD_I2C_BURST_MAX_DATA];
+    uint8_t data_len;
+} fbd_i2c_burst_cmd_t;
 
 typedef struct {
     fbd_value_t const_value;         /* FBD_NODE_CONST */
@@ -87,6 +107,11 @@ typedef struct {
     uint8_t i2c_register;               /* alamat register di dalam device */
     uint8_t i2c_data[8];                /* FBD_NODE_I2C_WRITE_REG: data yang ditulis */
     uint8_t i2c_data_len;                /* panjang i2c_data (write) / panjang dibaca (read) */
+
+    fbd_i2c_burst_cmd_t i2c_burst_cmds[FBD_I2C_BURST_MAX_CMDS]; /* FBD_NODE_I2C_WRITE_BURST */
+    uint8_t i2c_burst_cmd_count;         /* jumlah command terisi di i2c_burst_cmds, 1-FBD_I2C_BURST_MAX_CMDS */
+    uint32_t i2c_burst_delay_us;         /* delay antar command (mis. untuk toggle bit E LCD), 0 = tanpa delay */
+
     char sys_var_name[24];              /* FBD_NODE_SYS_VAR_GET: "SYS.WIFI_CONNECTED" dkk */
 } fbd_node_params_t;
 

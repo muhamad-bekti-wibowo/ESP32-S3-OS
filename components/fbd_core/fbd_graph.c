@@ -230,6 +230,25 @@ static fbd_value_t evaluate_node(fbd_node_t *node, fbd_var_store_t *vars, uint32
                                             node->params.i2c_data, node->params.i2c_data_len);
             return fbd_make_bool(ok);
         }
+        case FBD_NODE_I2C_WRITE_BURST: {
+            /* Kirim commands[] berurutan dalam SATU scan cycle. Berhenti di
+             * command pertama yang gagal (NACK/timeout) - output = false,
+             * sisa command TIDAK dicoba (device kemungkinan sudah dalam
+             * state tidak diketahui, melanjutkan berisiko salah kirim). */
+            bool ok = true;
+            uint8_t count = node->params.i2c_burst_cmd_count;
+            if (count > FBD_I2C_BURST_MAX_CMDS) count = FBD_I2C_BURST_MAX_CMDS;
+            for (uint8_t i = 0; i < count; ++i) {
+                const fbd_i2c_burst_cmd_t *cmd = &node->params.i2c_burst_cmds[i];
+                ok = i2c_bridge_write_reg(node->params.i2c_bus, node->params.i2c_address,
+                                           cmd->reg, cmd->data, cmd->data_len);
+                if (!ok) break;
+                if (node->params.i2c_burst_delay_us > 0 && i + 1 < count) {
+                    i2c_bridge_delay_us(node->params.i2c_burst_delay_us);
+                }
+            }
+            return fbd_make_bool(ok);
+        }
         case FBD_NODE_SYS_VAR_GET:
             return fbd_sys_vars_get(node->params.sys_var_name);
         default:

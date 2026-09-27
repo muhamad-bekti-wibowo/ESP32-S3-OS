@@ -11,6 +11,8 @@ test_host/*.exe
 test_host/*.obj
 test_host/*.pdb
 test_host/*.ilk
+test_host/*.exp
+test_host/*.lib
 
 # Editor
 .vscode/.vsix

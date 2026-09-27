@@ -75,6 +75,7 @@ static const char *node_type_to_str(fbd_node_type_t type)
         case FBD_NODE_SERVO:        return "servo";
         case FBD_NODE_I2C_READ_REG:  return "i2c_read_reg";
         case FBD_NODE_I2C_WRITE_REG: return "i2c_write_reg";
+        case FBD_NODE_I2C_WRITE_BURST: return "i2c_write_burst";
         case FBD_NODE_SYS_VAR_GET:   return "sys_var_get";
         default:                    return NULL;
     }
@@ -418,6 +419,46 @@ static bool parse_params(const cJSON *params, fbd_node_t *node, char *err, size_
             }
             break;
         }
+        case FBD_NODE_I2C_WRITE_BURST: {
+            const cJSON *bus = cJSON_GetObjectItem(params, "bus");
+            const cJSON *address = cJSON_GetObjectItem(params, "address");
+            const cJSON *commands = cJSON_GetObjectItem(params, "commands");
+            const cJSON *delay_us = cJSON_GetObjectItem(params, "delay_us");
+            if (!address || !cJSON_IsArray(commands)) {
+                set_err(err, err_len, "i2c_write_burst: params.address/commands (array) wajib");
+                return false;
+            }
+            int cmd_count = cJSON_GetArraySize(commands);
+            if (cmd_count < 1 || cmd_count > FBD_I2C_BURST_MAX_CMDS) {
+                set_err(err, err_len, "i2c_write_burst: params.commands panjangnya harus 1-8");
+                return false;
+            }
+            node->params.i2c_bus = bus ? (int)cJSON_GetNumberValue(bus) : 0;
+            node->params.i2c_address = (uint8_t)cJSON_GetNumberValue(address);
+            node->params.i2c_burst_delay_us = delay_us ? (uint32_t)cJSON_GetNumberValue(delay_us) : 0;
+            node->params.i2c_burst_cmd_count = (uint8_t)cmd_count;
+            for (int i = 0; i < cmd_count; ++i) {
+                const cJSON *cmd = cJSON_GetArrayItem(commands, i);
+                const cJSON *reg = cJSON_GetObjectItem(cmd, "register");
+                const cJSON *data = cJSON_GetObjectItem(cmd, "data");
+                if (!reg || !cJSON_IsArray(data)) {
+                    set_err(err, err_len, "i2c_write_burst: tiap commands[] wajib punya register+data (array)");
+                    return false;
+                }
+                int data_len = cJSON_GetArraySize(data);
+                if (data_len < 1 || data_len > FBD_I2C_BURST_MAX_DATA) {
+                    set_err(err, err_len, "i2c_write_burst: tiap commands[].data panjangnya harus 1-4");
+                    return false;
+                }
+                node->params.i2c_burst_cmds[i].reg = (uint8_t)cJSON_GetNumberValue(reg);
+                node->params.i2c_burst_cmds[i].data_len = (uint8_t)data_len;
+                for (int j = 0; j < data_len; ++j) {
+                    node->params.i2c_burst_cmds[i].data[j] =
+                        (uint8_t)cJSON_GetNumberValue(cJSON_GetArrayItem(data, j));
+                }
+            }
+            break;
+        }
         case FBD_NODE_SYS_VAR_GET: {
             const cJSON *name = cJSON_GetObjectItem(params, "name");
             if (!cJSON_IsString(name)) {
@@ -657,6 +698,25 @@ static cJSON *serialize_params(const fbd_node_t *node)
                 cJSON_AddItemToArray(data_arr, cJSON_CreateNumber(node->params.i2c_data[i]));
             }
             cJSON_AddItemToObject(params, "data", data_arr);
+            break;
+        }
+        case FBD_NODE_I2C_WRITE_BURST: {
+            cJSON_AddNumberToObject(params, "bus", node->params.i2c_bus);
+            cJSON_AddNumberToObject(params, "address", node->params.i2c_address);
+            cJSON_AddNumberToObject(params, "delay_us", node->params.i2c_burst_delay_us);
+            cJSON *commands_arr = cJSON_CreateArray();
+            for (int i = 0; i < node->params.i2c_burst_cmd_count; ++i) {
+                const fbd_i2c_burst_cmd_t *cmd = &node->params.i2c_burst_cmds[i];
+                cJSON *cmd_obj = cJSON_CreateObject();
+                cJSON_AddNumberToObject(cmd_obj, "register", cmd->reg);
+                cJSON *data_arr = cJSON_CreateArray();
+                for (int j = 0; j < cmd->data_len; ++j) {
+                    cJSON_AddItemToArray(data_arr, cJSON_CreateNumber(cmd->data[j]));
+                }
+                cJSON_AddItemToObject(cmd_obj, "data", data_arr);
+                cJSON_AddItemToArray(commands_arr, cmd_obj);
+            }
+            cJSON_AddItemToObject(params, "commands", commands_arr);
             break;
         }
         case FBD_NODE_SYS_VAR_GET:

@@ -218,6 +218,44 @@ Contoh:
 { "id": "i2c2", "type": "i2c_read_reg", "params": { "bus": 0, "address": 39, "register": 1, "length": 2 } }
 ```
 
+### I2C burst — banyak command dalam satu scan cycle
+
+`i2c_write_burst` mengirim **beberapa** command register write berurutan
+dalam SATU scan cycle — dipakai device yang butuh command sequence,
+misalnya LCD1602 lewat backpack PCF8574 (mode 4-bit: kirim nibble
+tinggi, nibble rendah, toggle bit E, delay tertentu, berulang per
+karakter). Tetap primitive generik (BUKAN driver LCD) — siapa pun bisa
+susun sequence apa pun lewat `commands[]`, cocok untuk periferal I2C
+lain juga.
+
+| `type` | `params` | Keterangan |
+|---|---|---|
+| `i2c_write_burst` | `{ "bus": 0, "address": 39, "delay_us": 50, "commands": [{ "register": 0, "data": [56] }, { "register": 0, "data": [12] }] }` | `commands`: array 1-8 objek `{register, data}`. Tiap `data`: array 1-4 byte. `delay_us`: jeda antar command (0 = tanpa delay). Output: `outputs[0]`=sukses (`bool`) — `false` kalau command manapun gagal (berhenti di command pertama yang NACK/timeout, sisa command TIDAK dicoba) |
+
+Batas: maksimal **8 command** per node, tiap command maksimal **4 byte**
+data. Kalau butuh command lebih banyak, sambung beberapa node
+`i2c_write_burst` berurutan di canvas (link output node pertama ke
+input tidak diperlukan — cukup tempatkan berurutan, keduanya tetap
+dieksekusi tiap scan cycle sesuai topological order).
+
+Contoh — init dasar LCD1602 PCF8574 (alamat `0x27` = `39`), sequence
+disederhanakan (nilai command sebenarnya tergantung wiring backpack,
+selalu cek datasheet/pinout PCF8574↔LCD board kamu):
+```json
+{
+  "id": "lcd_init", "type": "i2c_write_burst",
+  "params": {
+    "bus": 0, "address": 39, "delay_us": 50,
+    "commands": [
+      { "register": 0, "data": [56] },
+      { "register": 0, "data": [12] },
+      { "register": 0, "data": [1] },
+      { "register": 0, "data": [6] }
+    ]
+  }
+}
+```
+
 **Live monitor:** `outputs[0]`/`outputs[1]` tiap node (termasuk `raw_bytes`/
 `error` dari `i2c_read_reg`) muncul di field `"outputs"` pada response
 `GET /api/program` — polling minimal, bukan field yang dikirim balik lewat
