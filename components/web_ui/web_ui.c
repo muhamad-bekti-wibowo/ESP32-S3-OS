@@ -60,6 +60,11 @@ static esp_err_t static_get_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
     httpd_resp_set_type(req, guess_content_type(path));
+    /* Editor masih sering berubah selama development - cegah browser
+     * menyimpan versi lama app.js/style.css di cache (pernah bikin
+     * perubahan CSS/JS terlihat "tidak kepakai" padahal firmware sudah
+     * di-reflash dengan file baru). */
+    httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
     char buf[512];
     size_t n;
     while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {

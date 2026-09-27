@@ -1,8 +1,14 @@
 /* Logic UI editor FBD: registrasi node Drawflow, converter dua arah
  * Drawflow <-> schema.md, dan fetch save/load ke /api/program.
- * Lihat specs/04-drawflow-editor.md untuk scope & kriteria selesai. */
+ * Lihat specs/04-drawflow-editor.md untuk scope & kriteria selesai.
+ *
+ * UI: node di canvas hanya tampil label + segitiga indicator (menyala
+ * saat selected). Form params dipindah ke panel kanan (#properties),
+ * diisi sesuai node yang sedang diklik - bukan di dalam node itu sendiri
+ * (dulu bikin node crowded). */
 
 let editor;
+let selectedDfId = null;
 
 function setStatus(msg, isError) {
     const el = document.getElementById('toolbar-status');
@@ -10,33 +16,14 @@ function setStatus(msg, isError) {
     el.style.color = isError ? '#c00' : '#080';
 }
 
-/* ---- Setup Drawflow + palette ---- */
+/* ---- Node di canvas: label + segitiga, tanpa form ---- */
 
-function fieldInputHtml(nodeDfId, field, value) {
-    const id = `field-${nodeDfId}-${field.key}`;
-    if (field.type === 'select') {
-        const opts = field.options.map(o =>
-            `<option value="${o}" ${o === value ? 'selected' : ''}>${o}</option>`
-        ).join('');
-        return `<label>${field.label}: <select id="${id}" df-field="${field.key}">${opts}</select></label>`;
-    }
-    if (field.type === 'checkbox') {
-        return `<label><input type="checkbox" id="${id}" df-field="${field.key}" ${value ? 'checked' : ''}> ${field.label}</label>`;
-    }
-    if (field.type === 'number') {
-        return `<label>${field.label}: <input type="number" id="${id}" df-field="${field.key}" value="${value}"></label>`;
-    }
-    return `<label>${field.label}: <input type="text" id="${id}" df-field="${field.key}" value="${value}"></label>`;
-}
-
-function buildNodeHtml(type, params) {
+function buildNodeHtml(type) {
     const def = NODE_TYPES[type];
-    let html = `<div class="fbd-node-title">${def.label}</div>`;
-    def.fields.forEach(f => {
-        const value = (params && params[f.key] !== undefined) ? params[f.key] : f.default;
-        html += `<div class="fbd-field">${fieldInputHtml('X', f, value)}</div>`;
-    });
-    return html;
+    return `<div class="fbd-node-title">
+        <span class="fbd-node-label">${def.label}</span>
+        <span class="fbd-node-marker" aria-hidden="true"></span>
+    </div>`;
 }
 
 function defaultParams(type) {
@@ -49,7 +36,7 @@ function defaultParams(type) {
 function addNodeToCanvas(type, x, y) {
     const def = NODE_TYPES[type];
     const params = defaultParams(type);
-    const html = buildNodeHtml(type, params);
+    const html = buildNodeHtml(type);
     editor.addNode(
         type, def.inputs, def.outputs, x, y,
         'fbd-node', { fbdType: type, params }, html
@@ -69,28 +56,91 @@ function buildPalette() {
     });
 }
 
+/* ---- Panel properties kanan ---- */
+
+function fieldInputHtml(field, value) {
+    const id = `prop-${field.key}`;
+    if (field.type === 'select') {
+        const opts = field.options.map(o =>
+            `<option value="${o}" ${o === value ? 'selected' : ''}>${o}</option>`
+        ).join('');
+        return `<select id="${id}" df-field="${field.key}">${opts}</select>`;
+    }
+    if (field.type === 'checkbox') {
+        return `<input type="checkbox" id="${id}" df-field="${field.key}" ${value ? 'checked' : ''}>`;
+    }
+    if (field.type === 'number') {
+        return `<input type="number" id="${id}" df-field="${field.key}" value="${value}">`;
+    }
+    return `<input type="text" id="${id}" df-field="${field.key}" value="${value}">`;
+}
+
+function renderProperties(dfId) {
+    const panel = document.getElementById('properties-body');
+    if (dfId === null) {
+        panel.innerHTML = '<p class="properties-empty">Pilih node untuk mengatur properties</p>';
+        return;
+    }
+
+    const nodeData = editor.getNodeFromId(dfId);
+    const def = NODE_TYPES[nodeData.data.fbdType];
+
+    let html = `<div class="properties-node-type">${def.label}</div>`;
+    if (def.fields.length === 0) {
+        html += '<p class="properties-empty">Node ini tidak punya parameter</p>';
+    } else {
+        def.fields.forEach(f => {
+            const value = nodeData.data.params[f.key] !== undefined ? nodeData.data.params[f.key] : f.default;
+            html += `<div class="properties-field">
+                <label for="prop-${f.key}">${f.label}</label>
+                ${fieldInputHtml(f, value)}
+            </div>`;
+        });
+    }
+    panel.innerHTML = html;
+}
+
+function selectNode(dfId) {
+    if (selectedDfId !== null) {
+        const prevEl = document.getElementById(`node-${selectedDfId}`);
+        if (prevEl) prevEl.classList.remove('fbd-selected');
+    }
+    selectedDfId = dfId;
+    if (dfId !== null) {
+        const el = document.getElementById(`node-${dfId}`);
+        if (el) el.classList.add('fbd-selected');
+    }
+    renderProperties(dfId);
+}
+
+/* ---- Setup Drawflow ---- */
+
 function initEditor() {
     const container = document.getElementById('drawflow');
     editor = new Drawflow(container);
     editor.reroute = true;
     editor.start();
 
-    /* Simpan input field ke data node saat berubah, supaya editor.export()
-     * membawa params terbaru (Drawflow tidak auto-sync form -> data). */
-    container.addEventListener('input', (e) => {
+    editor.on('nodeSelected', (dfId) => selectNode(dfId));
+    editor.on('nodeUnselected', () => selectNode(null));
+    editor.on('nodeRemoved', (dfId) => {
+        if (String(selectedDfId) === String(dfId)) selectNode(null);
+    });
+
+    /* Simpan input field panel properties -> data node saat berubah,
+     * supaya editor.export() membawa params terbaru. */
+    document.getElementById('properties-body').addEventListener('input', (e) => {
         const fieldKey = e.target.getAttribute('df-field');
-        if (!fieldKey) return;
-        const nodeEl = e.target.closest('.drawflow-node');
-        if (!nodeEl) return;
-        const dfId = nodeEl.id.replace('node-', '');
-        const nodeData = editor.getNodeFromId(dfId);
+        if (!fieldKey || selectedDfId === null) return;
+        const nodeData = editor.getNodeFromId(selectedDfId);
         let value = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
         if (e.target.type === 'number') value = parseFloat(value);
         nodeData.data.params[fieldKey] = value;
-        editor.updateNodeDataFromId(dfId, nodeData.data);
+        editor.updateNodeDataFromId(selectedDfId, nodeData.data);
     });
 
     buildPalette();
+    renderProperties(null);
 }
 
 /* ---- Converter: Drawflow export format -> schema.md ---- */
@@ -115,7 +165,6 @@ function drawflowToSchema(drawflowExport) {
         Object.keys(dfNode.outputs || {}).forEach(outputKey => {
             const fromPort = parseInt(outputKey.replace('output_', ''), 10) - 1;
             (dfNode.outputs[outputKey].connections || []).forEach(conn => {
-                const targetNode = dfNodes[conn.node];
                 const toPort = parseInt(conn.output.replace('input_', ''), 10) - 1;
                 links.push({
                     from: { node: idOf(dfId), port: fromPort },
@@ -160,7 +209,7 @@ function schemaToDrawflow(schemaObj) {
             name: node.type,
             data: { fbdType: node.type, params: node.params || {} },
             class: 'fbd-node',
-            html: buildNodeHtml(node.type, node.params || {}),
+            html: buildNodeHtml(node.type),
             typenode: false,
             inputs,
             outputs,
@@ -219,6 +268,7 @@ async function loadProgram() {
         const drawflowData = schemaToDrawflow(schema);
         editor.clear();
         editor.import(drawflowData);
+        selectNode(null);
         setStatus('Load sukses');
     } catch (err) {
         setStatus(`Load error: ${err.message}`, true);
