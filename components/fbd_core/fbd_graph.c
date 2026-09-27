@@ -1,5 +1,7 @@
 #include "fbd_graph.h"
 #include "fbd_hw_backend.h"
+#include "i2c_bridge.h"
+#include "fbd_sys_vars.h"
 #include <string.h>
 
 void fbd_graph_init(fbd_graph_t *g)
@@ -89,7 +91,11 @@ bool fbd_graph_compile(fbd_graph_t *g)
     return g->order_count == n;
 }
 
-static fbd_value_t evaluate_node(fbd_node_t *node, fbd_var_store_t *vars, uint32_t now_ms)
+/* out_secondary diisi untuk node yang punya 2 output (saat ini hanya
+ * FBD_NODE_I2C_READ_REG: outputs[0]=raw_bytes, outputs[1]=error). Node lain
+ * mengabaikan parameter ini - default *out_secondary tetap FBD_EMPTY. */
+static fbd_value_t evaluate_node(fbd_node_t *node, fbd_var_store_t *vars, uint32_t now_ms,
+                                  fbd_value_t *out_secondary)
 {
     fbd_value_t *in = node->inputs;
 
@@ -209,6 +215,23 @@ static fbd_value_t evaluate_node(fbd_node_t *node, fbd_var_store_t *vars, uint32
             }
             return fbd_make_float(angle);
         }
+        case FBD_NODE_I2C_READ_REG: {
+            uint8_t buf[I2C_BRIDGE_MAX_DATA_LEN];
+            uint8_t len = node->params.i2c_data_len;
+            if (len > sizeof(buf)) len = sizeof(buf);
+            bool ok = i2c_bridge_read_reg(node->params.i2c_bus, node->params.i2c_address,
+                                           node->params.i2c_register, buf, len);
+            *out_secondary = fbd_make_bool(!ok);
+            return fbd_make_bytes(buf, len);
+        }
+        case FBD_NODE_I2C_WRITE_REG: {
+            bool ok = i2c_bridge_write_reg(node->params.i2c_bus, node->params.i2c_address,
+                                            node->params.i2c_register,
+                                            node->params.i2c_data, node->params.i2c_data_len);
+            return fbd_make_bool(ok);
+        }
+        case FBD_NODE_SYS_VAR_GET:
+            return fbd_sys_vars_get(node->params.sys_var_name);
         default:
             return fbd_make_empty();
     }
@@ -219,7 +242,8 @@ void fbd_graph_execute_cycle(fbd_graph_t *g, uint32_t now_ms)
     for (size_t k = 0; k < g->order_count; ++k) {
         size_t idx = g->execution_order[k];
         fbd_node_t *node = &g->nodes[idx];
-        node->outputs[0] = evaluate_node(node, &g->vars, now_ms);
+        node->outputs[1] = fbd_make_empty();
+        node->outputs[0] = evaluate_node(node, &g->vars, now_ms, &node->outputs[1]);
 
         for (size_t i = 0; i < g->link_count; ++i) {
             fbd_link_t *link = &g->links[i];

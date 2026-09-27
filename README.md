@@ -67,8 +67,37 @@ editor visual berbasis Drawflow yang di-hosting langsung dari ESP32-S3.
     di GPIO5).
   - Editor: slider (bukan number input polos) untuk `analog_input.sim_value`
     di panel Properties, sesuai kriteria spec 05.
-- **Berikutnya:** Level 2 (I2C primitive register-level, WiFi sebagai
-  system variable read-only).
+- **Selesai:** Level 2 — I2C primitive register-level (`i2c_read_reg`/
+  `i2c_write_reg`, HANYA primitive generik, bukan driver sensor spesifik)
+  dan WiFi sebagai system variable read-only (`sys_var_get`):
+  - `components/fbd_core/i2c_bridge.h` + `i2c_bridge_real.c` (ESP-IDF
+    `i2c_master`, timeout 8ms — NACK/timeout tidak pernah menahan scan
+    cycle) / `i2c_bridge_stub.c` (test host, selalu error karena tidak
+    ada bus I2C fisik di PC).
+  - `fbd_sys_vars.h`: provider pattern supaya `fbd_core` tidak depend
+    langsung ke `wifi_mgr` — `main.c` mendaftarkan getter
+    `SYS.WIFI_CONNECTED`/`SYS.WIFI_RSSI`.
+  - Live monitor: `outputs[]` tiap node (termasuk `raw_bytes`/`error`
+    dari `i2c_read_reg`) ditambahkan ke response `GET /api/program` —
+    polling minimal, bukan WebSocket (lebih sederhana, tanpa menambah
+    risiko regresi di `httpd` yang sudah stabil).
+  - Tab **System > Network** (`network.html`) terpisah dari canvas
+    Drawflow: `GET`/`POST /api/network` untuk baca/simpan SSID/password/
+    hostname WiFi STA ke NVS (`wifi_mgr_save_sta_config`). Password
+    tidak pernah diekspos balik lewat `GET`. Config baru diterapkan
+    setelah reboot (sengaja, supaya tidak memutus response HTTP yang
+    sedang mengirim "sukses" itu sendiri).
+  - **Diverifikasi penuh di hardware nyata:** `sys_var_get(SYS.WIFI_RSSI)`
+    membaca RSSI asli device (`-48`, `-56` dBm sesuai kondisi nyata,
+    bukan mock) dan dipakai `Compare` untuk warning LED. `i2c_read_reg`
+    dites dengan LCD 16x2 (PCF8574, alamat `0x27`) nyata — sukses
+    (`error=false`) dan gagal (alamat tidak ada, `error=true`) keduanya
+    terverifikasi, scan cycle tidak pernah macet di kedua kasus. Config
+    WiFi STA disimpan ke NVS lalu **dibaca ulang saat reboot** (bukan
+    hardcode lagi) — dibuktikan lewat log boot `Config WiFi STA dimuat
+    dari NVS`.
+- **Berikutnya:** live update program tanpa reboot (dual-buffer graph
+  swap).
 
 ### Bug signifikan yang ditemukan & diperbaiki selama verifikasi hardware
 - **Stack overflow di `fbd_json_parse()`**: `sizeof(fbd_graph_t)` ~19KB,
@@ -108,7 +137,10 @@ editor visual berbasis Drawflow yang di-hosting langsung dari ESP32-S3.
     dipensiunkan setelah migrasi penuh)
 - **`components/wifi_mgr/`** — WiFi APSTA: Access Point
   (SSID `ESP32-WebLogic`, password `logic1234`, IP `192.168.4.1`) DAN
-  koneksi STA ke jaringan rumah, untuk kemudahan dev.
+  koneksi STA (SSID/password dari NVS, fallback ke `MIFON` kalau belum
+  pernah dikonfigurasi via tab System > Network). Getter read-only untuk
+  `SYS.*` system variable (`wifi_mgr_is_sta_connected`,
+  `wifi_mgr_get_sta_rssi`, dst).
 - **`components/logic_engine/`** — interpreter v1 (block+index array),
   dipertahankan sementara hanya untuk `/api/status`, akan dihapus setelah
   migrasi ke `fbd_graph` selesai penuh.
@@ -169,6 +201,6 @@ Xtensa/RISC-V ESP dan tidak bisa menghasilkan binary native PC.
 - [x] Schema JSON di-freeze + endpoint save/load
 - [x] Editor visual Drawflow
 - [x] Level 1 — I/O fisik (digital/ADC/PWM/servo), dual backend simulated/real
-- [ ] Level 2 — I2C primitive register-level + WiFi sebagai system variable
+- [x] Level 2 — I2C primitive register-level + WiFi sebagai system variable
 - [ ] Live update program tanpa reboot, dual-buffer graph swap
 - [ ] Level 3 (SPI/I2S/CAN/dst) — **ditunda total**, bukan roadmap aktif

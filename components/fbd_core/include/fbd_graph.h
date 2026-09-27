@@ -42,6 +42,9 @@ typedef enum {
     FBD_NODE_ANALOG_IN,
     FBD_NODE_PWM_OUT,
     FBD_NODE_SERVO,
+    FBD_NODE_I2C_READ_REG,
+    FBD_NODE_I2C_WRITE_REG,
+    FBD_NODE_SYS_VAR_GET,
     FBD_NODE_TYPE_COUNT
 } fbd_node_type_t;
 
@@ -78,6 +81,13 @@ typedef struct {
     fbd_value_t sim_value;              /* FBD_NODE_ANALOG_IN mode simulated: nilai dari UI */
     uint32_t frequency;                 /* FBD_NODE_PWM_OUT (Hz) */
     uint32_t min_us, max_us;            /* FBD_NODE_SERVO: pulse width di sudut 0/180 derajat */
+
+    int i2c_bus;                        /* FBD_NODE_I2C_READ_REG/WRITE_REG: index bus (0) */
+    uint8_t i2c_address;                /* alamat 7-bit device I2C */
+    uint8_t i2c_register;               /* alamat register di dalam device */
+    uint8_t i2c_data[8];                /* FBD_NODE_I2C_WRITE_REG: data yang ditulis */
+    uint8_t i2c_data_len;                /* panjang i2c_data (write) / panjang dibaca (read) */
+    char sys_var_name[24];              /* FBD_NODE_SYS_VAR_GET: "SYS.WIFI_CONNECTED" dkk */
 } fbd_node_params_t;
 
 typedef struct {

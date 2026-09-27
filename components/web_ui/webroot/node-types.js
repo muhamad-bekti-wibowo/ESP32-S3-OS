@@ -142,6 +142,35 @@ const NODE_TYPES = {
               options: ['simulated', 'real'], default: 'simulated' },
         ],
     },
+
+    // ---- I2C primitive (Level 2, register-level, BUKAN driver sensor) ----
+    i2c_read_reg: {
+        label: 'I2C Read Reg', inputs: 0, outputs: 2,
+        fields: [
+            { key: 'bus', label: 'Bus', type: 'number', default: 0 },
+            { key: 'address', label: 'Address (7-bit)', type: 'number', default: 0x27 },
+            { key: 'register', label: 'Register', type: 'number', default: 0 },
+            { key: 'length', label: 'Length (1-8)', type: 'number', default: 2 },
+        ],
+    },
+    i2c_write_reg: {
+        label: 'I2C Write Reg', inputs: 0, outputs: 1,
+        fields: [
+            { key: 'bus', label: 'Bus', type: 'number', default: 0 },
+            { key: 'address', label: 'Address (7-bit)', type: 'number', default: 0x27 },
+            { key: 'register', label: 'Register', type: 'number', default: 0 },
+            { key: 'data', label: 'Data (csv, e.g. 16,32)', type: 'csv-bytes', default: [0] },
+        ],
+    },
+
+    // ---- System variable read-only (WiFi, dst - BUKAN dikonfigurasi di sini) ----
+    sys_var_get: {
+        label: 'Sys Var Get', inputs: 0, outputs: 1,
+        fields: [
+            { key: 'name', label: 'Name', type: 'select',
+              options: ['SYS.WIFI_CONNECTED', 'SYS.WIFI_RSSI'], default: 'SYS.WIFI_CONNECTED' },
+        ],
+    },
 };
 
 /* Label port input per tipe, khusus yang bukan generik "in0/in1". Dipakai

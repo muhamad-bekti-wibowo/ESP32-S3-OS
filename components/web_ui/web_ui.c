@@ -5,6 +5,7 @@
 #include "esp_spiffs.h"
 #include "cJSON.h"
 #include "fbd_json.h"
+#include "wifi_mgr.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
@@ -194,6 +195,86 @@ static esp_err_t status_get_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+/* ---- GET/POST /api/network : konfigurasi WiFi STA (SSID/password/hostname),
+ * tab "System > Network" terpisah dari canvas Drawflow (spec 06 - WiFi
+ * BUKAN node yang dikonfigurasi di canvas). ---- */
+
+static esp_err_t network_get_handler(httpd_req_t *req)
+{
+    char ssid[33] = {0};
+    char hostname[32] = {0};
+    wifi_mgr_get_sta_config(ssid, sizeof(ssid), hostname, sizeof(hostname));
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "ssid", ssid);
+    cJSON_AddStringToObject(root, "hostname", hostname);
+    cJSON_AddBoolToObject(root, "connected", wifi_mgr_is_sta_connected());
+    cJSON_AddNumberToObject(root, "rssi", wifi_mgr_get_sta_rssi());
+    char ip[16];
+    wifi_mgr_get_sta_ip(ip, sizeof(ip));
+    cJSON_AddStringToObject(root, "ip", ip);
+    /* password SENGAJA tidak diikutkan - lihat wifi_mgr_get_sta_config(). */
+
+    char *out = cJSON_PrintUnformatted(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, out);
+    free(out);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+static esp_err_t network_post_handler(httpd_req_t *req)
+{
+    int total = req->content_len;
+    if (total <= 0 || total > 512) {
+        return send_json_error(req, "ukuran body tidak valid");
+    }
+
+    char *buf = malloc(total + 1);
+    if (!buf) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "out of memory");
+        return ESP_FAIL;
+    }
+    int received = 0;
+    while (received < total) {
+        int r = httpd_req_recv(req, buf + received, total - received);
+        if (r <= 0) {
+            free(buf);
+            return send_json_error(req, "gagal membaca body");
+        }
+        received += r;
+    }
+    buf[total] = '\0';
+
+    cJSON *json = cJSON_Parse(buf);
+    free(buf);
+    if (!json) {
+        return send_json_error(req, "JSON tidak valid (parse error)");
+    }
+
+    const cJSON *ssid = cJSON_GetObjectItem(json, "ssid");
+    const cJSON *password = cJSON_GetObjectItem(json, "password");
+    const cJSON *hostname = cJSON_GetObjectItem(json, "hostname");
+    if (!cJSON_IsString(ssid) || strlen(ssid->valuestring) == 0) {
+        cJSON_Delete(json);
+        return send_json_error(req, "ssid wajib diisi");
+    }
+
+    bool ok = wifi_mgr_save_sta_config(
+        ssid->valuestring,
+        cJSON_IsString(password) ? password->valuestring : "",
+        cJSON_IsString(hostname) ? hostname->valuestring : NULL);
+    cJSON_Delete(json);
+
+    if (!ok) {
+        return send_json_error(req, "gagal menyimpan config ke NVS");
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"ok\",\"message\":\"Config tersimpan. Reboot device untuk menerapkan.\"}");
+    return ESP_OK;
+}
+
 static void mount_spiffs(void)
 {
     esp_vfs_spiffs_conf_t conf = {
@@ -218,7 +299,7 @@ void web_ui_start(logic_program_t *legacy_prog, fbd_graph_t *active_graph)
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.uri_match_fn = httpd_uri_match_wildcard;
-    config.max_uri_handlers = 8;
+    config.max_uri_handlers = 10;
     /* Default 4096 terlalu kecil untuk program_post_handler/program_get_handler
      * yang memanggil cJSON print/parse rekursif atas dokumen berisi puluhan
      * node - pernah menyebabkan stack overflow yang merusak heap TLSF secara
@@ -234,6 +315,8 @@ void web_ui_start(logic_program_t *legacy_prog, fbd_graph_t *active_graph)
     httpd_uri_t program_post_uri = { .uri = "/api/program", .method = HTTP_POST, .handler = program_post_handler };
     httpd_uri_t program_get_uri = { .uri = "/api/program", .method = HTTP_GET, .handler = program_get_handler };
     httpd_uri_t status_uri = { .uri = "/api/status", .method = HTTP_GET, .handler = status_get_handler };
+    httpd_uri_t network_get_uri = { .uri = "/api/network", .method = HTTP_GET, .handler = network_get_handler };
+    httpd_uri_t network_post_uri = { .uri = "/api/network", .method = HTTP_POST, .handler = network_post_handler };
     /* Wildcard, harus didaftarkan setelah /api/... supaya tidak menutupi -
      * httpd_uri_match_wildcard cocokkan URI paling spesifik dulu terlepas
      * urutan register, tapi tetap didaftarkan terakhir untuk kejelasan. */
@@ -242,6 +325,8 @@ void web_ui_start(logic_program_t *legacy_prog, fbd_graph_t *active_graph)
     httpd_register_uri_handler(server, &program_post_uri);
     httpd_register_uri_handler(server, &program_get_uri);
     httpd_register_uri_handler(server, &status_uri);
+    httpd_register_uri_handler(server, &network_get_uri);
+    httpd_register_uri_handler(server, &network_post_uri);
     httpd_register_uri_handler(server, &static_uri);
 
     ESP_LOGI(TAG, "web server siap");

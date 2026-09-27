@@ -194,10 +194,59 @@ skala logic yang sama setelah `hw_mode` diganti `"real"` — nilai presisi
 boleh beda (ADC nyata punya noise, potensiometer fisik bukan angka bulat),
 tapi arah naik/turun dan threshold logic harus konsisten.
 
-### Reserved untuk Level 2 (belum diimplementasikan, JANGAN dipakai sebelum spec 06)
+### I2C primitive register-level (Level 2)
 
-`i2c_read_reg`, `i2c_write_reg`, `sys_var_get` — lihat
-[specs/06-level2-i2c-wifi.md](specs/06-level2-i2c-wifi.md).
+**HANYA primitive generik, BUKAN driver sensor spesifik** (plan.md prinsip
+#2). Sensor riil (LCD1602 backpack, INA219, dst) dikomposisikan dari
+`i2c_read_reg`/`i2c_write_reg` di level graph JSON — TIDAK ADA kode C baru
+per sensor.
+
+Tidak ada `params.hw_mode` untuk I2C (beda dari analog/PWM/servo) — I2C
+selalu berarti bus fisik sungguhan, tidak ada "simulasi" yang masuk akal
+untuk device I2C dengan alamat nyata. Timeout wajib pendek (8ms, lihat
+`I2C_BRIDGE_TIMEOUT_MS`) — NACK/timeout tidak pernah menahan scan cycle
+lebih lama dari itu.
+
+| `type` | `params` | Keterangan |
+|---|---|---|
+| `i2c_read_reg` | `{ "bus": 0, "address": 39, "register": 1, "length": 2 }` | `address`: 7-bit (contoh: `39` = `0x27`, alamat khas LCD1602 backpack PCF8574). `length`: 1-8. Output: `outputs[0]`=raw bytes (`FBD_BYTES`), `outputs[1]`=error (`bool`, `true` kalau NACK/timeout) |
+| `i2c_write_reg` | `{ "bus": 0, "address": 39, "register": 0, "data": [16, 32] }` | `data`: array 1-7 byte. Output: `outputs[0]`=sukses (`bool`) |
+
+Contoh:
+```json
+{ "id": "i2c1", "type": "i2c_write_reg", "params": { "bus": 0, "address": 39, "register": 0, "data": [16, 32] } }
+{ "id": "i2c2", "type": "i2c_read_reg", "params": { "bus": 0, "address": 39, "register": 1, "length": 2 } }
+```
+
+**Live monitor:** `outputs[0]`/`outputs[1]` tiap node (termasuk `raw_bytes`/
+`error` dari `i2c_read_reg`) muncul di field `"outputs"` pada response
+`GET /api/program` — polling minimal, bukan field yang dikirim balik lewat
+`POST` (field `outputs` diabaikan saat parse, murni untuk observasi).
+
+### System variable read-only (Level 2)
+
+**BUKAN node yang dikonfigurasi di canvas dengan SSID/password** — WiFi
+tetap dikonfigurasi lewat tab "System > Network" terpisah di web UI
+(disimpan ke NVS). FBD hanya membaca statusnya sebagai variable read-only,
+mirip `%SM` di PLC Siemens/Omron.
+
+| `type` | `params` | Keterangan |
+|---|---|---|
+| `sys_var_get` | `{ "name": "SYS.WIFI_RSSI" }` | `name` salah satu: `SYS.WIFI_CONNECTED` (bool), `SYS.WIFI_RSSI` (int32, dBm) |
+
+Contoh — warning LED saat sinyal WiFi lemah:
+```json
+{ "id": "rssi1", "type": "sys_var_get", "params": { "name": "SYS.WIFI_RSSI" } }
+{ "id": "th1", "type": "const", "params": { "datatype": "float", "value": -80 } }
+{ "id": "cmp1", "type": "compare", "params": { "op": "lt" } }
+{ "id": "led1", "type": "digital_output", "params": { "pin": 5, "invert": false, "hw_mode": "real" } }
+```
+(link: `rssi1→cmp1.in0`, `th1→cmp1.in1`, `cmp1→led1.in0`)
+
+`SYS.IP_ADDRESS`/`SYS.HOSTNAME` **belum didukung** lewat `sys_var_get` —
+representasi string tidak muat di `fbd_value_t` (maks 8 byte). Kalau
+dibutuhkan, akan diekspos lewat endpoint HTTP terpisah, bukan dipaksa
+lewat FBDValue.
 
 ## Contoh document lengkap (dari plan.md §7.1)
 

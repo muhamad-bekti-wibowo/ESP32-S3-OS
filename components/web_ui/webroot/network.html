@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<title>System &gt; Network</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="network-page">
+
+<div class="network-card">
+  <h3>System &gt; Network</h3>
+
+  <div id="network-status" class="properties-field">
+    <label>Status saat ini</label>
+    <p id="network-status-text" class="properties-empty">Memuat...</p>
+  </div>
+
+  <div class="properties-field">
+    <label for="net-ssid">SSID</label>
+    <input type="text" id="net-ssid" placeholder="Nama WiFi">
+  </div>
+  <div class="properties-field">
+    <label for="net-password">Password (kosongkan kalau open network)</label>
+    <input type="password" id="net-password" placeholder="Password baru">
+  </div>
+  <div class="properties-field">
+    <label for="net-hostname">Hostname (mDNS)</label>
+    <input type="text" id="net-hostname" placeholder="esp32-fbd">
+  </div>
+
+  <button onclick="saveNetworkConfig()">Save Config</button>
+  <a href="/" class="network-back-link">&larr; Kembali ke editor</a>
+  <p id="network-save-status" class="properties-empty"></p>
+</div>
+
+<script>
+async function loadNetworkStatus() {
+    try {
+        const res = await fetch('/api/network');
+        const data = await res.json();
+        document.getElementById('network-status-text').textContent =
+            `${data.connected ? 'Terhubung' : 'Tidak terhubung'} ke "${data.ssid}"` +
+            (data.connected ? ` (RSSI ${data.rssi} dBm, IP ${data.ip})` : '');
+        document.getElementById('net-ssid').value = data.ssid;
+        document.getElementById('net-hostname').value = data.hostname;
+    } catch (err) {
+        document.getElementById('network-status-text').textContent = 'Gagal memuat status: ' + err.message;
+    }
+}
+
+async function saveNetworkConfig() {
+    const ssid = document.getElementById('net-ssid').value;
+    const password = document.getElementById('net-password').value;
+    const hostname = document.getElementById('net-hostname').value;
+    const statusEl = document.getElementById('network-save-status');
+
+    try {
+        const res = await fetch('/api/network', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ssid, password, hostname }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            statusEl.textContent = 'Gagal: ' + (data.message || res.statusText);
+            statusEl.style.color = '#c00';
+            return;
+        }
+        statusEl.textContent = data.message;
+        statusEl.style.color = '#080';
+    } catch (err) {
+        statusEl.textContent = 'Error: ' + err.message;
+        statusEl.style.color = '#c00';
+    }
+}
+
+loadNetworkStatus();
+</script>
+</body>
+</html>

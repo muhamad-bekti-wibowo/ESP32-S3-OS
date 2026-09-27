@@ -36,28 +36,22 @@ Run-HostTest "fbd_core_test" @(
     "components\fbd_core\fbd_nodes.c"
 ) @("components\fbd_core\include")
 
-Run-HostTest "fbd_graph_test" @(
-    "test_host\fbd_graph_test.c"
+$graphDeps = @(
     "components\fbd_core\fbd_value.c"
     "components\fbd_core\fbd_nodes.c"
     "components\fbd_core\fbd_graph.c"
     "components\fbd_core\fbd_hw_sim.c"
-) @("components\fbd_core\include")
+    "components\fbd_core\i2c_bridge_stub.c"
+    "components\fbd_core\fbd_sys_vars.c"
+)
 
-Run-HostTest "fbd_json_test" @(
-    "test_host\fbd_json_test.c"
-    "components\fbd_core\fbd_value.c"
-    "components\fbd_core\fbd_nodes.c"
-    "components\fbd_core\fbd_graph.c"
-    "components\fbd_core\fbd_hw_sim.c"
+Run-HostTest "fbd_graph_test" (@("test_host\fbd_graph_test.c") + $graphDeps) @("components\fbd_core\include")
+
+Run-HostTest "fbd_json_test" (@("test_host\fbd_json_test.c") + $graphDeps + @(
     "components\fbd_core\fbd_json.c"
     "$cJsonDir\cJSON.c"
-) @("components\fbd_core\include", $cJsonDir)
+)) @("components\fbd_core\include", $cJsonDir)
 
-Run-HostTest "fbd_hw_test" @(
-    "test_host\fbd_hw_test.c"
-    "components\fbd_core\fbd_value.c"
-    "components\fbd_core\fbd_nodes.c"
-    "components\fbd_core\fbd_graph.c"
-    "components\fbd_core\fbd_hw_sim.c"
-) @("components\fbd_core\include")
+Run-HostTest "fbd_hw_test" (@("test_host\fbd_hw_test.c") + $graphDeps) @("components\fbd_core\include")
+
+Run-HostTest "fbd_i2c_test" (@("test_host\fbd_i2c_test.c") + $graphDeps) @("components\fbd_core\include")

@@ -4,6 +4,41 @@ Semua perubahan penting proyek ini dicatat di file ini.
 
 ## [Unreleased]
 
+### Added (Level 2: I2C primitive + WiFi system variable)
+- `i2c_bridge.h`: interface I2C register-level generik (`i2c_bridge_read_reg`/
+  `write_reg`), TIDAK ADA mode simulated (I2C selalu bus fisik nyata, beda
+  dari ADC/PWM/servo). `i2c_bridge_real.c` (ESP-IDF `i2c_master`, timeout
+  8ms, cache device handle per alamat) untuk firmware; `i2c_bridge_stub.c`
+  (selalu error) untuk test host.
+- Node baru: `i2c_read_reg` (`outputs[0]`=raw_bytes, `outputs[1]`=error),
+  `i2c_write_reg`, `sys_var_get`. Validasi params di `fbd_json.c`.
+- `fbd_sys_vars.h`: provider pattern (function pointer terdaftar dari
+  `main.c`) supaya `fbd_core` tidak depend langsung ke `wifi_mgr`.
+  `SYS.WIFI_CONNECTED`/`SYS.WIFI_RSSI` didukung; `SYS.IP_ADDRESS`/
+  `SYS.HOSTNAME` belum (string tidak muat di `fbd_value_t` 8-byte).
+- `wifi_mgr`: getter read-only (`wifi_mgr_is_sta_connected`,
+  `wifi_mgr_get_sta_rssi`, `wifi_mgr_get_sta_ip`) + config STA dari NVS
+  (`load_sta_config_from_nvs`, `wifi_mgr_save_sta_config`) dengan fallback
+  ke SSID hardcode kalau NVS kosong.
+- `web_ui.c`: `GET /api/program` sekarang menyertakan `outputs` tiap node
+  (live monitor polling minimal, pengganti WebSocket — lebih sederhana,
+  tidak menambah risiko regresi di `httpd` yang sudah stabil). Endpoint
+  baru `GET`/`POST /api/network` untuk tab System > Network
+  (`network.html`, terpisah dari canvas Drawflow) — password tidak pernah
+  diekspos balik lewat `GET`, config baru berlaku setelah reboot (sengaja).
+
+### Verified (hardware ESP32-S3 + LCD 16x2 I2C nyata)
+- `sys_var_get(SYS.WIFI_RSSI)` membaca RSSI asli (-48, -56 dBm sesuai
+  kondisi nyata) dipakai `Compare` untuk warning LED — logic benar di
+  kedua kondisi (RSSI kuat & lemah).
+- `i2c_read_reg(address=0x27)` (LCD 16x2 PCF8574 nyata): sukses,
+  `error=false`. `i2c_read_reg(address=100)` (device tidak ada): NACK
+  terdeteksi, `error=true`, fallback `[0,0]`. Scan cycle log konsisten
+  tanpa gap di kedua kasus — I2C gagal tidak pernah menahan scan cycle.
+- `POST /api/network` (SSID=MIFON) tersimpan ke NVS, dibaca ulang saat
+  reboot (log `Config WiFi STA dimuat dari NVS: SSID=MIFON`), device
+  reconnect ke IP yang sama.
+
 ### Added (Level 1 I/O: dual backend simulated/real)
 - `components/fbd_core/fbd_hw_backend.h`: interface dual backend (function
   pointer per operasi) untuk `digital_input`/`digital_output`/

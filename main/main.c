@@ -4,13 +4,30 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 
+#include <string.h>
+
 #include "wifi_mgr.h"
 #include "web_ui.h"
 #include "logic_engine.h"
 #include "fbd_graph.h"
 #include "fbd_hw_backend.h"
+#include "fbd_sys_vars.h"
 
 static const char *TAG = "app_main";
+
+/* Provider SYS.* (spec 06): wifi_mgr punya getter WiFi, fbd_core tidak
+ * boleh depend langsung ke wifi_mgr (fbd_core generik, wifi_mgr spesifik
+ * proyek ini) - jadi didaftarkan di sini, layer yang tahu keduanya. */
+static fbd_value_t sys_var_provider(const char *name)
+{
+    if (strcmp(name, "SYS.WIFI_CONNECTED") == 0) {
+        return fbd_make_bool(wifi_mgr_is_sta_connected());
+    }
+    if (strcmp(name, "SYS.WIFI_RSSI") == 0) {
+        return fbd_make_int(wifi_mgr_get_sta_rssi());
+    }
+    return fbd_make_empty();
+}
 
 /* logic_engine v1: tetap dipakai web_ui untuk endpoint /api/status apa
  * adanya (format lama, dipertahankan untuk debug selama migrasi bertahap
@@ -105,6 +122,7 @@ void app_main(void)
      * "simulated" (lihat fbd_json.c parse_hw_mode) sampai user eksplisit
      * ganti ke "real" di editor atau JSON. */
     fbd_hw_set_backend(fbd_hw_real_backend());
+    fbd_sys_vars_set_provider(sys_var_provider);
 
     wifi_mgr_start_apsta();
     web_ui_start(&s_legacy_program, &s_active_graph);

@@ -81,6 +81,14 @@ function fieldInputHtml(field, value) {
     if (field.type === 'number') {
         return `<input type="number" id="${id}" df-field="${field.key}" value="${value}">`;
     }
+    if (field.type === 'csv-bytes') {
+        /* Array byte (i2c_write_reg.data) diedit sebagai text "16,32" ->
+         * di-parse jadi [16, 32] saat disimpan, lihat handler input di
+         * initEditor(). Ditampilkan sebagai csv karena Drawflow/HTML form
+         * tidak punya widget array bawaan yang sederhana. */
+        const csv = Array.isArray(value) ? value.join(',') : value;
+        return `<input type="text" id="${id}" df-field="${field.key}" df-field-type="csv-bytes" value="${csv}">`;
+    }
     return `<input type="text" id="${id}" df-field="${field.key}" value="${value}">`;
 }
 
@@ -144,6 +152,9 @@ function initEditor() {
         const nodeData = editor.getNodeFromId(selectedDfId);
         let value = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
         if (e.target.type === 'number' || e.target.type === 'range') value = parseFloat(value);
+        if (e.target.getAttribute('df-field-type') === 'csv-bytes') {
+            value = value.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
+        }
         nodeData.data.params[fieldKey] = value;
         editor.updateNodeDataFromId(selectedDfId, nodeData.data);
     });

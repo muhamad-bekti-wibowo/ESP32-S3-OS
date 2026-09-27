@@ -165,6 +165,55 @@ static void test_hw_mode_default_simulated_when_omitted(void)
     cJSON_Delete(root);
 }
 
+static void test_i2c_and_sys_var_roundtrip(void)
+{
+    const char *json =
+    "{ \"version\": 1, \"nodes\": ["
+    "  { \"id\": \"r1\", \"type\": \"i2c_read_reg\", \"params\": { \"bus\": 0, \"address\": 39, \"register\": 1, \"length\": 2 } },"
+    "  { \"id\": \"w1\", \"type\": \"i2c_write_reg\", \"params\": { \"bus\": 0, \"address\": 39, \"register\": 0, \"data\": [16, 32] } },"
+    "  { \"id\": \"s1\", \"type\": \"sys_var_get\", \"params\": { \"name\": \"SYS.WIFI_RSSI\" } }"
+    "], \"links\": [] }";
+
+    cJSON *root = cJSON_Parse(json);
+    fbd_graph_t g;
+    char err[FBD_JSON_ERR_LEN] = {0};
+    bool ok = fbd_json_parse(root, &g, err, sizeof(err));
+    CHECK(ok, "i2c_read_reg/i2c_write_reg/sys_var_get berhasil di-parse");
+    if (!ok) printf("  error: %s\n", err);
+    cJSON_Delete(root);
+
+    size_t r1_idx = fbd_graph_find_node(&g, "r1");
+    CHECK(g.nodes[r1_idx].params.i2c_address == 39, "r1 params.address = 39 (0x27)");
+    CHECK(g.nodes[r1_idx].params.i2c_register == 1, "r1 params.register = 1");
+    CHECK(g.nodes[r1_idx].params.i2c_data_len == 2, "r1 params.length = 2");
+
+    size_t w1_idx = fbd_graph_find_node(&g, "w1");
+    CHECK(w1_idx != (size_t)-1, "w1 ditemukan");
+    CHECK(g.nodes[w1_idx].params.i2c_data_len == 2, "w1 params.data panjang 2");
+    CHECK(g.nodes[w1_idx].params.i2c_data[0] == 16 && g.nodes[w1_idx].params.i2c_data[1] == 32,
+          "w1 params.data = [16, 32]");
+
+    size_t s1_idx = fbd_graph_find_node(&g, "s1");
+    CHECK(strcmp(g.nodes[s1_idx].params.sys_var_name, "SYS.WIFI_RSSI") == 0,
+          "s1 params.name = SYS.WIFI_RSSI");
+
+    cJSON *serialized = fbd_json_serialize(&g);
+    char *serialized_str = cJSON_PrintUnformatted(serialized);
+
+    cJSON *root2 = cJSON_Parse(serialized_str);
+    fbd_graph_t g2;
+    bool ok2 = fbd_json_parse(root2, &g2, err, sizeof(err));
+    CHECK(ok2, "hasil serialize i2c/sys_var bisa di-parse ulang (round-trip)");
+
+    size_t w2_idx = fbd_graph_find_node(&g2, "w1");
+    CHECK(g2.nodes[w2_idx].params.i2c_data[0] == 16 && g2.nodes[w2_idx].params.i2c_data[1] == 32,
+          "round-trip: w1 params.data tetap [16, 32]");
+
+    free(serialized_str);
+    cJSON_Delete(serialized);
+    cJSON_Delete(root2);
+}
+
 static void test_reject_unsafe_pin_when_real(void)
 {
     /* Strapping pin (GPIO0) dengan hw_mode real HARUS ditolak - berisiko
@@ -269,6 +318,7 @@ int main(void)
     test_roundtrip();
     test_level1_analog_pwm_servo_roundtrip();
     test_hw_mode_default_simulated_when_omitted();
+    test_i2c_and_sys_var_roundtrip();
     test_reject_unsafe_pin_when_real();
     test_reject_unknown_id_in_link();
     test_reject_unknown_type();

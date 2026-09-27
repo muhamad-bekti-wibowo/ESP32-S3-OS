@@ -1,4 +1,5 @@
 #include "fbd_json.h"
+#include "i2c_bridge.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -72,6 +73,9 @@ static const char *node_type_to_str(fbd_node_type_t type)
         case FBD_NODE_ANALOG_IN:    return "analog_input";
         case FBD_NODE_PWM_OUT:      return "pwm_output";
         case FBD_NODE_SERVO:        return "servo";
+        case FBD_NODE_I2C_READ_REG:  return "i2c_read_reg";
+        case FBD_NODE_I2C_WRITE_REG: return "i2c_write_reg";
+        case FBD_NODE_SYS_VAR_GET:   return "sys_var_get";
         default:                    return NULL;
     }
 }
@@ -371,6 +375,59 @@ static bool parse_params(const cJSON *params, fbd_node_t *node, char *err, size_
                 !is_pin_safe_for_real_gpio(node->params.pin, err, err_len)) return false;
             break;
         }
+        case FBD_NODE_I2C_READ_REG: {
+            const cJSON *bus = cJSON_GetObjectItem(params, "bus");
+            const cJSON *address = cJSON_GetObjectItem(params, "address");
+            const cJSON *reg = cJSON_GetObjectItem(params, "register");
+            const cJSON *length = cJSON_GetObjectItem(params, "length");
+            if (!address || !reg || !length) {
+                set_err(err, err_len, "i2c_read_reg: params.address/register/length wajib");
+                return false;
+            }
+            node->params.i2c_bus = bus ? (int)cJSON_GetNumberValue(bus) : 0;
+            node->params.i2c_address = (uint8_t)cJSON_GetNumberValue(address);
+            node->params.i2c_register = (uint8_t)cJSON_GetNumberValue(reg);
+            int len = (int)cJSON_GetNumberValue(length);
+            if (len < 1 || len > I2C_BRIDGE_MAX_DATA_LEN) {
+                set_err(err, err_len, "i2c_read_reg: params.length harus 1-8");
+                return false;
+            }
+            node->params.i2c_data_len = (uint8_t)len;
+            break;
+        }
+        case FBD_NODE_I2C_WRITE_REG: {
+            const cJSON *bus = cJSON_GetObjectItem(params, "bus");
+            const cJSON *address = cJSON_GetObjectItem(params, "address");
+            const cJSON *reg = cJSON_GetObjectItem(params, "register");
+            const cJSON *data = cJSON_GetObjectItem(params, "data");
+            if (!address || !reg || !cJSON_IsArray(data)) {
+                set_err(err, err_len, "i2c_write_reg: params.address/register/data (array) wajib");
+                return false;
+            }
+            int len = cJSON_GetArraySize(data);
+            if (len < 1 || len > I2C_BRIDGE_MAX_DATA_LEN - 1) {
+                set_err(err, err_len, "i2c_write_reg: params.data panjangnya harus 1-7");
+                return false;
+            }
+            node->params.i2c_bus = bus ? (int)cJSON_GetNumberValue(bus) : 0;
+            node->params.i2c_address = (uint8_t)cJSON_GetNumberValue(address);
+            node->params.i2c_register = (uint8_t)cJSON_GetNumberValue(reg);
+            node->params.i2c_data_len = (uint8_t)len;
+            for (int i = 0; i < len; ++i) {
+                node->params.i2c_data[i] = (uint8_t)cJSON_GetNumberValue(cJSON_GetArrayItem(data, i));
+            }
+            break;
+        }
+        case FBD_NODE_SYS_VAR_GET: {
+            const cJSON *name = cJSON_GetObjectItem(params, "name");
+            if (!cJSON_IsString(name)) {
+                set_err(err, err_len, "sys_var_get: params.name wajib string");
+                return false;
+            }
+            strncpy(node->params.sys_var_name, name->valuestring, sizeof(node->params.sys_var_name) - 1);
+            node->params.sys_var_name[sizeof(node->params.sys_var_name) - 1] = '\0';
+            break;
+        }
         case FBD_NODE_AND:
         case FBD_NODE_OR:
         case FBD_NODE_NOT:
@@ -585,10 +642,51 @@ static cJSON *serialize_params(const fbd_node_t *node)
             cJSON_AddNumberToObject(params, "max_us", node->params.max_us);
             cJSON_AddStringToObject(params, "hw_mode", hw_mode_to_str(node->params.hw_mode));
             break;
+        case FBD_NODE_I2C_READ_REG:
+            cJSON_AddNumberToObject(params, "bus", node->params.i2c_bus);
+            cJSON_AddNumberToObject(params, "address", node->params.i2c_address);
+            cJSON_AddNumberToObject(params, "register", node->params.i2c_register);
+            cJSON_AddNumberToObject(params, "length", node->params.i2c_data_len);
+            break;
+        case FBD_NODE_I2C_WRITE_REG: {
+            cJSON_AddNumberToObject(params, "bus", node->params.i2c_bus);
+            cJSON_AddNumberToObject(params, "address", node->params.i2c_address);
+            cJSON_AddNumberToObject(params, "register", node->params.i2c_register);
+            cJSON *data_arr = cJSON_CreateArray();
+            for (int i = 0; i < node->params.i2c_data_len; ++i) {
+                cJSON_AddItemToArray(data_arr, cJSON_CreateNumber(node->params.i2c_data[i]));
+            }
+            cJSON_AddItemToObject(params, "data", data_arr);
+            break;
+        }
+        case FBD_NODE_SYS_VAR_GET:
+            cJSON_AddStringToObject(params, "name", node->params.sys_var_name);
+            break;
         default:
             break;
     }
     return params;
+}
+
+/* Serialize satu fbd_value_t ke bentuk JSON generik, dipakai untuk live
+ * monitor ("outputs" tiap node di GET /api/program - lihat specs/
+ * 06-level2-i2c-wifi.md, polling minimal pengganti WebSocket). Bukan bagian
+ * dari "params" node manapun - hanya untuk observasi read-only. */
+static cJSON *serialize_fbd_value(fbd_value_t v)
+{
+    switch (v.type) {
+        case FBD_BOOL:  return cJSON_CreateBool(v.b);
+        case FBD_INT32: return cJSON_CreateNumber(v.i);
+        case FBD_FLOAT:  return cJSON_CreateNumber(v.f);
+        case FBD_BYTES: {
+            cJSON *arr = cJSON_CreateArray();
+            for (uint8_t i = 0; i < v.bytes.len; ++i) {
+                cJSON_AddItemToArray(arr, cJSON_CreateNumber(v.bytes.data[i]));
+            }
+            return arr;
+        }
+        default: return cJSON_CreateNull();
+    }
 }
 
 cJSON *fbd_json_serialize(const fbd_graph_t *g)
@@ -603,6 +701,16 @@ cJSON *fbd_json_serialize(const fbd_graph_t *g)
         cJSON_AddStringToObject(node_json, "id", node->id);
         cJSON_AddStringToObject(node_json, "type", node_type_to_str(node->type));
         cJSON_AddItemToObject(node_json, "params", serialize_params(node));
+
+        /* "outputs": nilai runtime read-only utk live monitor (mis.
+         * raw_bytes/error dari i2c_read_reg) - BUKAN bagian schema untuk
+         * di-load balik, cuma observasi. Selalu 2 elemen sesuai
+         * FBD_MAX_NODE_OUTPUTS, walau kebanyakan node cuma pakai outputs[0]. */
+        cJSON *outputs = cJSON_CreateArray();
+        cJSON_AddItemToArray(outputs, serialize_fbd_value(node->outputs[0]));
+        cJSON_AddItemToArray(outputs, serialize_fbd_value(node->outputs[1]));
+        cJSON_AddItemToObject(node_json, "outputs", outputs);
+
         cJSON_AddItemToArray(nodes, node_json);
     }
     cJSON_AddItemToObject(root, "nodes", nodes);
