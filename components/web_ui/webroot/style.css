@@ -154,6 +154,28 @@ h3 {
     border-color: var(--accent);
 }
 
+.properties-range-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.properties-range-row input[type="range"] {
+    flex: 1;
+    padding: 0;
+    border: none;
+    background: transparent;
+    accent-color: var(--accent);
+}
+
+.properties-range-value {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--accent);
+    min-width: 36px;
+    text-align: right;
+}
+
 .properties-field input[type="checkbox"] {
     width: auto;
 }

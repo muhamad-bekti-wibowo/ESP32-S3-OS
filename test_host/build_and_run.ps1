@@ -41,6 +41,7 @@ Run-HostTest "fbd_graph_test" @(
     "components\fbd_core\fbd_value.c"
     "components\fbd_core\fbd_nodes.c"
     "components\fbd_core\fbd_graph.c"
+    "components\fbd_core\fbd_hw_sim.c"
 ) @("components\fbd_core\include")
 
 Run-HostTest "fbd_json_test" @(
@@ -48,6 +49,15 @@ Run-HostTest "fbd_json_test" @(
     "components\fbd_core\fbd_value.c"
     "components\fbd_core\fbd_nodes.c"
     "components\fbd_core\fbd_graph.c"
+    "components\fbd_core\fbd_hw_sim.c"
     "components\fbd_core\fbd_json.c"
     "$cJsonDir\cJSON.c"
 ) @("components\fbd_core\include", $cJsonDir)
+
+Run-HostTest "fbd_hw_test" @(
+    "test_host\fbd_hw_test.c"
+    "components\fbd_core\fbd_value.c"
+    "components\fbd_core\fbd_nodes.c"
+    "components\fbd_core\fbd_graph.c"
+    "components\fbd_core\fbd_hw_sim.c"
+) @("components\fbd_core\include")

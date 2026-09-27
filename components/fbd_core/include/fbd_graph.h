@@ -39,6 +39,9 @@ typedef enum {
     FBD_NODE_CTU,
     FBD_NODE_DIGITAL_IN,
     FBD_NODE_DIGITAL_OUT,
+    FBD_NODE_ANALOG_IN,
+    FBD_NODE_PWM_OUT,
+    FBD_NODE_SERVO,
     FBD_NODE_TYPE_COUNT
 } fbd_node_type_t;
 
@@ -47,6 +50,14 @@ typedef enum {
     FBD_PIN_MODE_PULLDOWN,
     FBD_PIN_MODE_FLOATING
 } fbd_pin_mode_t;
+
+/* Dual backend (plan.md §3): setiap node peripheral fisik punya params.mode
+ * "simulated" (nilai dari UI, tidak menyentuh hardware) atau "real"
+ * (ESP-IDF driver nyata). Dipakai FBD_NODE_ANALOG_IN/PWM_OUT/SERVO. */
+typedef enum {
+    FBD_HW_SIMULATED = 0,
+    FBD_HW_REAL
+} fbd_hw_mode_t;
 
 typedef struct {
     fbd_value_t const_value;         /* FBD_NODE_CONST */
@@ -57,14 +68,26 @@ typedef struct {
     float clamp_min, clamp_max;       /* FBD_NODE_CLAMP */
     uint32_t delay_ms;                 /* FBD_NODE_TON/TOF/TP */
     int32_t preset;                    /* FBD_NODE_CTU */
-    int pin;                            /* FBD_NODE_DIGITAL_IN/OUT */
+    int pin;                            /* FBD_NODE_DIGITAL_IN/OUT/ANALOG_IN/PWM_OUT/SERVO */
     bool invert;                        /* FBD_NODE_DIGITAL_IN/OUT */
     fbd_pin_mode_t pin_mode;            /* FBD_NODE_DIGITAL_IN saja */
+
+    fbd_hw_mode_t hw_mode;              /* FBD_NODE_DIGITAL_IN/OUT/ANALOG_IN/PWM_OUT/SERVO */
+    int resolution;                     /* FBD_NODE_ANALOG_IN (bit) / FBD_NODE_PWM_OUT (bit) */
+    int attenuation;                    /* FBD_NODE_ANALOG_IN (dB, 0/2/6/11) */
+    fbd_value_t sim_value;              /* FBD_NODE_ANALOG_IN mode simulated: nilai dari UI */
+    uint32_t frequency;                 /* FBD_NODE_PWM_OUT (Hz) */
+    uint32_t min_us, max_us;            /* FBD_NODE_SERVO: pulse width di sudut 0/180 derajat */
 } fbd_node_params_t;
 
 typedef struct {
     fbd_timer_state_t timer;
     fbd_counter_state_t counter;
+    bool hw_initialized; /* FBD_NODE_DIGITAL_IN/OUT/ANALOG_IN/PWM_OUT/SERVO:
+                          * true setelah backend->*_init() dipanggil sekali.
+                          * Init hardware TIDAK boleh dipanggil tiap scan
+                          * cycle (gpio_config/ledc_channel_config mahal &
+                          * bisa reset state fisik tiap 20ms). */
 } fbd_node_state_t;
 
 typedef struct {

@@ -4,6 +4,39 @@ Semua perubahan penting proyek ini dicatat di file ini.
 
 ## [Unreleased]
 
+### Added (Level 1 I/O: dual backend simulated/real)
+- `components/fbd_core/fbd_hw_backend.h`: interface dual backend (function
+  pointer per operasi) untuk `digital_input`/`digital_output`/
+  `analog_input`/`pwm_output`/`servo` — `params.hw_mode` per-node
+  menentukan `"simulated"` atau `"real"`, dipilih tanpa branch hardcoded
+  di `fbd_graph.c`.
+- `fbd_hw_sim.c`: backend simulated, tidak menyentuh register apa pun.
+  Dites di host (`test_host/fbd_hw_test.c`) — skenario kriteria selesai
+  spec 05a: `analog_input(simulated) → SCALE → Compare > 50 →
+  digital_output` jalan benar tanpa hardware ADC nyata.
+- `fbd_hw_real.c`: backend real, driver ESP-IDF nyata (`gpio`,
+  `adc_oneshot`, `ledc`). Init hardware per node dilakukan sekali
+  (`state.hw_initialized`), bukan tiap scan cycle.
+- Node type baru: `analog_input`, `pwm_output`, `servo` (params sesuai
+  [schema.md](../schema.md)) + field `hw_mode` ditambahkan ke
+  `digital_input`/`digital_output` yang sudah ada.
+- Validasi pin GPIO ESP32-S3 di `fbd_json.c`: `POST /api/program` menolak
+  `hw_mode: "real"` pada strapping pin (0/3/45/46), USB-JTAG (19/20), atau
+  SPI flash/PSRAM (26-37, device ini pakai PSRAM Octal 8MB). Mode
+  `simulated` tidak divalidasi.
+- `main.c`: `fbd_hw_set_backend(fbd_hw_real_backend())` dipanggil sekali
+  di startup — backend real selalu tersedia, node memilih lewat
+  `params.hw_mode` masing-masing. `simulate_digital_inputs()` disesuaikan
+  supaya tidak menimpa node yang sudah `hw_mode: real`.
+- Editor: slider (`type: 'range'`) untuk `analog_input.sim_value` di
+  panel Properties, sesuai kriteria spec 05 ("slider untuk analog_input").
+
+### Verified (hardware ESP32-S3 nyata)
+- `digital_input(pin=4, real, pullup)` → `digital_output(pin=5, real)`
+  di-`POST` ke device, scan cycle tetap stabil (`node_count=2`, tidak ada
+  gap) tanpa crash setelah GPIO real diaktifkan. Pengukuran multimeter
+  langsung (tombol fisik → LED) belum dilakukan manusia.
+
 ### Added (editor Drawflow)
 - Vendor Drawflow (drawflow.min.js/css, ~48KB total) ke `webroot/`, tanpa
   CDN — device offline-first, AP mode tanpa internet.

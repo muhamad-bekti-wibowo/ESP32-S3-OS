@@ -9,6 +9,39 @@ static void set_err(char *err, size_t err_len, const char *msg)
     }
 }
 
+/* Validasi pin GPIO ESP32-S3 - HANYA diterapkan saat hw_mode == real
+ * (mode simulated tidak pernah menyentuh GPIO fisik sama sekali, jadi
+ * angka pin di sana murni informasional). Berdasarkan datasheet ESP32-S3:
+ * - GPIO0, 3, 45, 46: strapping pin (boot mode) - mengubahnya saat boot
+ *   bisa membuat device gagal boot atau masuk mode download tak sengaja.
+ * - GPIO19, 20: default dipakai USB-JTAG (debugging via USB bawaan).
+ * - GPIO26-37: dipakai SPI flash/PSRAM pada board dengan Octal PSRAM
+ *   (device proyek ini pakai PSRAM Octal 8MB, dikonfirmasi dari log boot
+ *   "Embedded PSRAM 8MB") - dipakai untuk GPIO lain bisa corrupt flash/PSRAM.
+ * Rentang valid GPIO ESP32-S3: 0-48, tapi tidak semua nomor itu ada fisik
+ * di tiap breakout board - validasi ini hanya soal keamanan elektrikal,
+ * bukan jaminan pin itu ke-broke-out di board tertentu. */
+static bool is_pin_safe_for_real_gpio(int pin, char *err, size_t err_len)
+{
+    if (pin < 0 || pin > 48) {
+        set_err(err, err_len, "pin di luar rentang valid ESP32-S3 (0-48)");
+        return false;
+    }
+    if (pin == 0 || pin == 3 || pin == 45 || pin == 46) {
+        set_err(err, err_len, "pin adalah strapping pin ESP32-S3 (0/3/45/46) - jangan dipakai hw_mode real, berisiko device gagal boot");
+        return false;
+    }
+    if (pin == 19 || pin == 20) {
+        set_err(err, err_len, "pin 19/20 dipakai USB-JTAG bawaan - pakai hw_mode real di sini akan mematikan debugging USB");
+        return false;
+    }
+    if (pin >= 26 && pin <= 37) {
+        set_err(err, err_len, "pin 26-37 dipakai SPI flash/PSRAM (device ini pakai PSRAM Octal) - hw_mode real di sini bisa corrupt flash/PSRAM");
+        return false;
+    }
+    return true;
+}
+
 /* ---- type <-> string ---- */
 
 static const char *node_type_to_str(fbd_node_type_t type)
@@ -36,6 +69,9 @@ static const char *node_type_to_str(fbd_node_type_t type)
         case FBD_NODE_CTU:          return "ctu";
         case FBD_NODE_DIGITAL_IN:   return "digital_input";
         case FBD_NODE_DIGITAL_OUT:  return "digital_output";
+        case FBD_NODE_ANALOG_IN:    return "analog_input";
+        case FBD_NODE_PWM_OUT:      return "pwm_output";
+        case FBD_NODE_SERVO:        return "servo";
         default:                    return NULL;
     }
 }
@@ -112,6 +148,35 @@ static bool str_to_pin_mode(const char *s, fbd_pin_mode_t *out)
     if (strcmp(s, "pulldown") == 0) { *out = FBD_PIN_MODE_PULLDOWN; return true; }
     if (strcmp(s, "floating") == 0) { *out = FBD_PIN_MODE_FLOATING; return true; }
     return false;
+}
+
+static const char *hw_mode_to_str(fbd_hw_mode_t mode)
+{
+    return (mode == FBD_HW_REAL) ? "real" : "simulated";
+}
+
+static bool str_to_hw_mode(const char *s, fbd_hw_mode_t *out)
+{
+    if (strcmp(s, "simulated") == 0) { *out = FBD_HW_SIMULATED; return true; }
+    if (strcmp(s, "real") == 0)      { *out = FBD_HW_REAL;      return true; }
+    return false;
+}
+
+/* params.hw_mode opsional - default simulated kalau tidak dikirim (dual
+ * backend, plan.md §3: perilaku aman-default adalah tidak menyentuh
+ * hardware sampai user eksplisit set "real"). */
+static bool parse_hw_mode(const cJSON *params, fbd_hw_mode_t *out, char *err, size_t err_len)
+{
+    const cJSON *hw_mode = cJSON_GetObjectItem(params, "hw_mode");
+    if (!hw_mode) {
+        *out = FBD_HW_SIMULATED;
+        return true;
+    }
+    if (!cJSON_IsString(hw_mode) || !str_to_hw_mode(hw_mode->valuestring, out)) {
+        set_err(err, err_len, "params.hw_mode tidak valid (simulated/real)");
+        return false;
+    }
+    return true;
 }
 
 /* ---- parse params per node type ---- */
@@ -236,6 +301,9 @@ static bool parse_params(const cJSON *params, fbd_node_t *node, char *err, size_
                 set_err(err, err_len, "digital_input: params.mode tidak valid (pullup/pulldown/floating)");
                 return false;
             }
+            if (!parse_hw_mode(params, &node->params.hw_mode, err, err_len)) return false;
+            if (node->params.hw_mode == FBD_HW_REAL &&
+                !is_pin_safe_for_real_gpio(node->params.pin, err, err_len)) return false;
             break;
         }
         case FBD_NODE_DIGITAL_OUT: {
@@ -247,6 +315,60 @@ static bool parse_params(const cJSON *params, fbd_node_t *node, char *err, size_
             node->params.pin = (int)cJSON_GetNumberValue(pin);
             const cJSON *invert = cJSON_GetObjectItem(params, "invert");
             node->params.invert = invert ? cJSON_IsTrue(invert) : false;
+            if (!parse_hw_mode(params, &node->params.hw_mode, err, err_len)) return false;
+            if (node->params.hw_mode == FBD_HW_REAL &&
+                !is_pin_safe_for_real_gpio(node->params.pin, err, err_len)) return false;
+            break;
+        }
+        case FBD_NODE_ANALOG_IN: {
+            const cJSON *pin = cJSON_GetObjectItem(params, "pin");
+            const cJSON *resolution = cJSON_GetObjectItem(params, "resolution");
+            const cJSON *attenuation = cJSON_GetObjectItem(params, "attenuation");
+            if (!pin || !resolution || !attenuation) {
+                set_err(err, err_len, "analog_input: params.pin/resolution/attenuation wajib");
+                return false;
+            }
+            node->params.pin = (int)cJSON_GetNumberValue(pin);
+            node->params.resolution = (int)cJSON_GetNumberValue(resolution);
+            node->params.attenuation = (int)cJSON_GetNumberValue(attenuation);
+            const cJSON *sim_value = cJSON_GetObjectItem(params, "sim_value");
+            node->params.sim_value = sim_value ? fbd_make_int((int32_t)cJSON_GetNumberValue(sim_value))
+                                                : fbd_make_int(0);
+            if (!parse_hw_mode(params, &node->params.hw_mode, err, err_len)) return false;
+            if (node->params.hw_mode == FBD_HW_REAL &&
+                !is_pin_safe_for_real_gpio(node->params.pin, err, err_len)) return false;
+            break;
+        }
+        case FBD_NODE_PWM_OUT: {
+            const cJSON *pin = cJSON_GetObjectItem(params, "pin");
+            const cJSON *frequency = cJSON_GetObjectItem(params, "frequency");
+            const cJSON *resolution = cJSON_GetObjectItem(params, "resolution");
+            if (!pin || !frequency || !resolution) {
+                set_err(err, err_len, "pwm_output: params.pin/frequency/resolution wajib");
+                return false;
+            }
+            node->params.pin = (int)cJSON_GetNumberValue(pin);
+            node->params.frequency = (uint32_t)cJSON_GetNumberValue(frequency);
+            node->params.resolution = (int)cJSON_GetNumberValue(resolution);
+            if (!parse_hw_mode(params, &node->params.hw_mode, err, err_len)) return false;
+            if (node->params.hw_mode == FBD_HW_REAL &&
+                !is_pin_safe_for_real_gpio(node->params.pin, err, err_len)) return false;
+            break;
+        }
+        case FBD_NODE_SERVO: {
+            const cJSON *pin = cJSON_GetObjectItem(params, "pin");
+            const cJSON *min_us = cJSON_GetObjectItem(params, "min_us");
+            const cJSON *max_us = cJSON_GetObjectItem(params, "max_us");
+            if (!pin || !min_us || !max_us) {
+                set_err(err, err_len, "servo: params.pin/min_us/max_us wajib");
+                return false;
+            }
+            node->params.pin = (int)cJSON_GetNumberValue(pin);
+            node->params.min_us = (uint32_t)cJSON_GetNumberValue(min_us);
+            node->params.max_us = (uint32_t)cJSON_GetNumberValue(max_us);
+            if (!parse_hw_mode(params, &node->params.hw_mode, err, err_len)) return false;
+            if (node->params.hw_mode == FBD_HW_REAL &&
+                !is_pin_safe_for_real_gpio(node->params.pin, err, err_len)) return false;
             break;
         }
         case FBD_NODE_AND:
@@ -437,10 +559,31 @@ static cJSON *serialize_params(const fbd_node_t *node)
             cJSON_AddNumberToObject(params, "pin", node->params.pin);
             cJSON_AddStringToObject(params, "mode", pin_mode_to_str(node->params.pin_mode));
             cJSON_AddBoolToObject(params, "invert", node->params.invert);
+            cJSON_AddStringToObject(params, "hw_mode", hw_mode_to_str(node->params.hw_mode));
             break;
         case FBD_NODE_DIGITAL_OUT:
             cJSON_AddNumberToObject(params, "pin", node->params.pin);
             cJSON_AddBoolToObject(params, "invert", node->params.invert);
+            cJSON_AddStringToObject(params, "hw_mode", hw_mode_to_str(node->params.hw_mode));
+            break;
+        case FBD_NODE_ANALOG_IN:
+            cJSON_AddNumberToObject(params, "pin", node->params.pin);
+            cJSON_AddNumberToObject(params, "resolution", node->params.resolution);
+            cJSON_AddNumberToObject(params, "attenuation", node->params.attenuation);
+            cJSON_AddNumberToObject(params, "sim_value", (double)node->params.sim_value.i);
+            cJSON_AddStringToObject(params, "hw_mode", hw_mode_to_str(node->params.hw_mode));
+            break;
+        case FBD_NODE_PWM_OUT:
+            cJSON_AddNumberToObject(params, "pin", node->params.pin);
+            cJSON_AddNumberToObject(params, "frequency", node->params.frequency);
+            cJSON_AddNumberToObject(params, "resolution", node->params.resolution);
+            cJSON_AddStringToObject(params, "hw_mode", hw_mode_to_str(node->params.hw_mode));
+            break;
+        case FBD_NODE_SERVO:
+            cJSON_AddNumberToObject(params, "pin", node->params.pin);
+            cJSON_AddNumberToObject(params, "min_us", node->params.min_us);
+            cJSON_AddNumberToObject(params, "max_us", node->params.max_us);
+            cJSON_AddStringToObject(params, "hw_mode", hw_mode_to_str(node->params.hw_mode));
             break;
         default:
             break;

@@ -134,24 +134,65 @@ Contoh:
 { "id": "t1", "type": "ton", "params": { "delay_ms": 2000 } }
 ```
 
-### I/O digital (Level 1, bagian dasar sudah ada sejak v1)
+### I/O digital (Level 1)
+
+Field `params.mode` (`"simulated"` atau `"real"`) menentukan dual backend
+(plan.md §3): `"simulated"` (default) tidak menyentuh GPIO fisik sama
+sekali — `digital_input` pass-through `inputs[0]`/`digital_output`
+pass-through nilai tanpa efek fisik. `"real"` memanggil driver GPIO
+ESP-IDF (`gpio_config`/`gpio_get_level`/`gpio_set_level`) sungguhan.
 
 | `type` | `params` | Keterangan |
 |---|---|---|
-| `digital_input` | `{ "pin": 4, "mode": "pullup", "invert": false }` | Level 1 fisik — implementasi hardware di spec 05, untuk sekarang pass-through |
-| `digital_output` | `{ "pin": 2, "invert": false }` | sama |
+| `digital_input` | `{ "pin": 4, "mode": "pullup", "invert": false, "hw_mode": "simulated" }` | `mode`: `pullup`\|`pulldown`\|`floating` (konfigurasi pull resistor, hanya dipakai saat `hw_mode: "real"`) |
+| `digital_output` | `{ "pin": 5, "invert": false, "hw_mode": "simulated" }` | |
 
 Contoh:
 ```json
-{ "id": "n1", "type": "digital_input", "params": { "pin": 4, "mode": "pullup", "invert": false } }
+{ "id": "n1", "type": "digital_input", "params": { "pin": 4, "mode": "pullup", "invert": false, "hw_mode": "simulated" } }
 ```
 
-### Reserved untuk Level 1 (belum diimplementasikan, JANGAN dipakai sebelum spec 05)
+#### Validasi pin GPIO (WAJIB, hanya berlaku saat `hw_mode: "real"`)
 
-`analog_input`, `pwm_output`, `servo` — field `params.mode` (`"simulated"`
-atau `"real"`) akan ditambahkan di spec 05. Jangan kirim `type` ini di
-`POST /api/program` sebelum spec 05 selesai — parser akan menolaknya
-sebagai `type` tidak dikenal.
+Parser (`fbd_json.c`) menolak `POST /api/program` yang memakai pin di
+bawah ini dengan `hw_mode: "real"` untuk `digital_input`/`digital_output`/
+`analog_input`/`pwm_output`/`servo`. Saat `hw_mode: "simulated"`, angka
+pin murni informasional — tidak divalidasi karena tidak pernah menyentuh
+GPIO fisik.
+
+| Pin | Alasan dilarang |
+|---|---|
+| GPIO0, 3, 45, 46 | Strapping pin (menentukan boot mode) — mengubahnya bisa membuat device gagal boot atau masuk mode download tak sengaja |
+| GPIO19, 20 | Default dipakai USB-JTAG bawaan — dipakai GPIO lain akan mematikan debugging via USB |
+| GPIO26–37 | Dipakai SPI flash/PSRAM (device proyek ini pakai PSRAM Octal 8MB) — dipakai GPIO lain berisiko corrupt flash/PSRAM |
+
+Pin yang aman dipakai (contoh, tidak lengkap): **GPIO4, 5, 6, 7, 8, 9, 10,
+11, 12, 13, 14, 15, 16, 17, 18, 21, 38–48**. Selalu cek breakout board
+fisik — tidak semua nomor GPIO di atas ke-broke-out di setiap board.
+
+### I/O analog & PWM (Level 1)
+
+Field `params.hw_mode` sama seperti I/O digital — `"simulated"` (default)
+atau `"real"`.
+
+| `type` | `params` | Keterangan |
+|---|---|---|
+| `analog_input` | `{ "pin": 4, "resolution": 12, "attenuation": 11, "hw_mode": "simulated", "sim_value": 2048 }` | `resolution`: bit ADC (9-12). `attenuation`: dB (0/2/6/11, menentukan rentang tegangan terukur — 11dB = ~0-3.3V). `sim_value`: nilai dipakai saat `hw_mode: "simulated"`, di-set lewat slider UI atau langsung di JSON |
+| `pwm_output` | `{ "pin": 5, "frequency": 1000, "resolution": 12, "hw_mode": "simulated" }` | Input node (`inputs[0]`) adalah duty cycle dalam persen (0-100), bukan raw register. `resolution`: bit duty cycle LEDC |
+| `servo` | `{ "pin": 18, "min_us": 500, "max_us": 2500, "hw_mode": "simulated" }` | Input node adalah sudut 0-180 derajat (di-clamp otomatis kalau di luar rentang). `min_us`/`max_us`: pulse width di sudut 0°/180° |
+
+Contoh:
+```json
+{ "id": "ai1", "type": "analog_input", "params": { "pin": 4, "resolution": 12, "attenuation": 11, "hw_mode": "simulated", "sim_value": 2048 } }
+{ "id": "pwm1", "type": "pwm_output", "params": { "pin": 5, "frequency": 1000, "resolution": 12, "hw_mode": "simulated" } }
+{ "id": "servo1", "type": "servo", "params": { "pin": 18, "min_us": 500, "max_us": 2500, "hw_mode": "simulated" } }
+```
+
+**Kriteria konsistensi mode:** rangkaian yang jalan benar di `hw_mode:
+"simulated"` (tanpa hardware sama sekali) harus tetap jalan dengan arah/
+skala logic yang sama setelah `hw_mode` diganti `"real"` — nilai presisi
+boleh beda (ADC nyata punya noise, potensiometer fisik bukan angka bulat),
+tapi arah naik/turun dan threshold logic harus konsisten.
 
 ### Reserved untuk Level 2 (belum diimplementasikan, JANGAN dipakai sebelum spec 06)
 

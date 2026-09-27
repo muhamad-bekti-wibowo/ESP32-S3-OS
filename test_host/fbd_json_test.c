@@ -91,6 +91,135 @@ static void test_roundtrip(void)
     cJSON_Delete(root2);
 }
 
+static void test_level1_analog_pwm_servo_roundtrip(void)
+{
+    const char *json =
+    "{ \"version\": 1, \"nodes\": ["
+    "  { \"id\": \"ai1\", \"type\": \"analog_input\", \"params\": { \"pin\": 4, \"resolution\": 12, \"attenuation\": 11, \"hw_mode\": \"simulated\", \"sim_value\": 2048 } },"
+    "  { \"id\": \"pwm1\", \"type\": \"pwm_output\", \"params\": { \"pin\": 5, \"frequency\": 1000, \"resolution\": 12, \"hw_mode\": \"simulated\" } },"
+    "  { \"id\": \"servo1\", \"type\": \"servo\", \"params\": { \"pin\": 18, \"min_us\": 500, \"max_us\": 2500, \"hw_mode\": \"real\" } }"
+    "], \"links\": [] }";
+
+    cJSON *root = cJSON_Parse(json);
+    fbd_graph_t g;
+    char err[FBD_JSON_ERR_LEN] = {0};
+    bool ok = fbd_json_parse(root, &g, err, sizeof(err));
+    CHECK(ok, "analog_input/pwm_output/servo berhasil di-parse");
+    if (!ok) printf("  error: %s\n", err);
+    cJSON_Delete(root);
+
+    size_t ai_idx = fbd_graph_find_node(&g, "ai1");
+    CHECK(g.nodes[ai_idx].type == FBD_NODE_ANALOG_IN, "ai1 bertipe FBD_NODE_ANALOG_IN");
+    CHECK(g.nodes[ai_idx].params.pin == 4, "ai1 params.pin = 4");
+    CHECK(g.nodes[ai_idx].params.resolution == 12, "ai1 params.resolution = 12");
+    CHECK(g.nodes[ai_idx].params.attenuation == 11, "ai1 params.attenuation = 11");
+    CHECK(g.nodes[ai_idx].params.hw_mode == FBD_HW_SIMULATED, "ai1 params.hw_mode = simulated");
+    CHECK(g.nodes[ai_idx].params.sim_value.i == 2048, "ai1 params.sim_value = 2048");
+
+    size_t pwm_idx = fbd_graph_find_node(&g, "pwm1");
+    CHECK(g.nodes[pwm_idx].params.frequency == 1000, "pwm1 params.frequency = 1000");
+
+    size_t servo_idx = fbd_graph_find_node(&g, "servo1");
+    CHECK(g.nodes[servo_idx].params.min_us == 500, "servo1 params.min_us = 500");
+    CHECK(g.nodes[servo_idx].params.max_us == 2500, "servo1 params.max_us = 2500");
+    CHECK(g.nodes[servo_idx].params.hw_mode == FBD_HW_REAL, "servo1 params.hw_mode = real");
+
+    cJSON *serialized = fbd_json_serialize(&g);
+    char *serialized_str = cJSON_PrintUnformatted(serialized);
+
+    cJSON *root2 = cJSON_Parse(serialized_str);
+    fbd_graph_t g2;
+    bool ok2 = fbd_json_parse(root2, &g2, err, sizeof(err));
+    CHECK(ok2, "hasil serialize analog_input/pwm_output/servo bisa di-parse ulang (round-trip)");
+
+    size_t ai2_idx = fbd_graph_find_node(&g2, "ai1");
+    CHECK(g2.nodes[ai2_idx].params.sim_value.i == 2048, "round-trip: ai1 sim_value tetap 2048");
+    size_t servo2_idx = fbd_graph_find_node(&g2, "servo1");
+    CHECK(g2.nodes[servo2_idx].params.hw_mode == FBD_HW_REAL, "round-trip: servo1 hw_mode tetap real");
+
+    free(serialized_str);
+    cJSON_Delete(serialized);
+    cJSON_Delete(root2);
+}
+
+static void test_hw_mode_default_simulated_when_omitted(void)
+{
+    /* JSON lama (sebelum spec 05) tanpa field hw_mode sama sekali harus
+     * tetap ter-parse - backward compatible, default ke simulated. */
+    const char *json =
+    "{ \"version\": 1, \"nodes\": ["
+    "  { \"id\": \"n1\", \"type\": \"digital_input\", \"params\": { \"pin\": 4, \"mode\": \"pullup\", \"invert\": false } }"
+    "], \"links\": [] }";
+
+    cJSON *root = cJSON_Parse(json);
+    fbd_graph_t g;
+    char err[FBD_JSON_ERR_LEN] = {0};
+    bool ok = fbd_json_parse(root, &g, err, sizeof(err));
+    CHECK(ok, "digital_input tanpa hw_mode (JSON lama) tetap ter-parse");
+    if (!ok) printf("  error: %s\n", err);
+
+    size_t n1_idx = fbd_graph_find_node(&g, "n1");
+    CHECK(g.nodes[n1_idx].params.hw_mode == FBD_HW_SIMULATED,
+          "hw_mode default simulated saat tidak dikirim di JSON");
+
+    cJSON_Delete(root);
+}
+
+static void test_reject_unsafe_pin_when_real(void)
+{
+    /* Strapping pin (GPIO0) dengan hw_mode real HARUS ditolak - berisiko
+     * device gagal boot kalau benar-benar dipakai gpio_config(). */
+    const char *json_strapping =
+    "{ \"version\": 1, \"nodes\": ["
+    "  { \"id\": \"n1\", \"type\": \"digital_output\", \"params\": { \"pin\": 0, \"invert\": false, \"hw_mode\": \"real\" } }"
+    "], \"links\": [] }";
+    cJSON *root1 = cJSON_Parse(json_strapping);
+    fbd_graph_t g1;
+    char err1[FBD_JSON_ERR_LEN] = {0};
+    bool ok1 = fbd_json_parse(root1, &g1, err1, sizeof(err1));
+    CHECK(ok1 == false, "digital_output pin=0 (strapping) hw_mode=real -> ditolak");
+    printf("  error (diharapkan): %s\n", err1);
+    cJSON_Delete(root1);
+
+    /* PSRAM/flash pin (GPIO28) dengan hw_mode real HARUS ditolak. */
+    const char *json_psram =
+    "{ \"version\": 1, \"nodes\": ["
+    "  { \"id\": \"n1\", \"type\": \"digital_output\", \"params\": { \"pin\": 28, \"invert\": false, \"hw_mode\": \"real\" } }"
+    "], \"links\": [] }";
+    cJSON *root2 = cJSON_Parse(json_psram);
+    fbd_graph_t g2;
+    char err2[FBD_JSON_ERR_LEN] = {0};
+    bool ok2 = fbd_json_parse(root2, &g2, err2, sizeof(err2));
+    CHECK(ok2 == false, "digital_output pin=28 (PSRAM/flash) hw_mode=real -> ditolak");
+    cJSON_Delete(root2);
+
+    /* Pin yang sama (GPIO0) TAPI hw_mode simulated -> HARUS tetap diterima,
+     * karena mode simulated tidak pernah menyentuh GPIO fisik sama sekali. */
+    const char *json_sim_ok =
+    "{ \"version\": 1, \"nodes\": ["
+    "  { \"id\": \"n1\", \"type\": \"digital_output\", \"params\": { \"pin\": 0, \"invert\": false, \"hw_mode\": \"simulated\" } }"
+    "], \"links\": [] }";
+    cJSON *root3 = cJSON_Parse(json_sim_ok);
+    fbd_graph_t g3;
+    char err3[FBD_JSON_ERR_LEN] = {0};
+    bool ok3 = fbd_json_parse(root3, &g3, err3, sizeof(err3));
+    CHECK(ok3 == true, "digital_output pin=0 hw_mode=simulated -> tetap diterima (tidak menyentuh GPIO fisik)");
+    cJSON_Delete(root3);
+
+    /* Pin aman (GPIO4) dengan hw_mode real -> HARUS diterima. */
+    const char *json_safe =
+    "{ \"version\": 1, \"nodes\": ["
+    "  { \"id\": \"n1\", \"type\": \"digital_input\", \"params\": { \"pin\": 4, \"mode\": \"pullup\", \"invert\": false, \"hw_mode\": \"real\" } }"
+    "], \"links\": [] }";
+    cJSON *root4 = cJSON_Parse(json_safe);
+    fbd_graph_t g4;
+    char err4[FBD_JSON_ERR_LEN] = {0};
+    bool ok4 = fbd_json_parse(root4, &g4, err4, sizeof(err4));
+    CHECK(ok4 == true, "digital_input pin=4 hw_mode=real -> diterima (pin aman)");
+    if (!ok4) printf("  error: %s\n", err4);
+    cJSON_Delete(root4);
+}
+
 static void test_reject_unknown_id_in_link(void)
 {
     const char *bad_json =
@@ -138,6 +267,9 @@ int main(void)
 {
     test_parse_example_from_schema();
     test_roundtrip();
+    test_level1_analog_pwm_servo_roundtrip();
+    test_hw_mode_default_simulated_when_omitted();
+    test_reject_unsafe_pin_when_real();
     test_reject_unknown_id_in_link();
     test_reject_unknown_type();
     test_reject_unknown_version();

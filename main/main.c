@@ -8,6 +8,7 @@
 #include "web_ui.h"
 #include "logic_engine.h"
 #include "fbd_graph.h"
+#include "fbd_hw_backend.h"
 
 static const char *TAG = "app_main";
 
@@ -45,14 +46,18 @@ static void build_default_graph(fbd_graph_t *g)
     }
 }
 
-/* Simulasi input digital_input: set true untuk semua node FBD_NODE_DIGITAL_IN
- * di graph yang SEDANG aktif (bukan berasumsi id tertentu ada), supaya scan
- * task tidak crash setelah graph diganti lewat POST /api/program dengan
- * node id yang berbeda. Diganti dengan pembacaan GPIO fisik di spec 05. */
+/* Simulasi input digital_input: set true untuk node FBD_NODE_DIGITAL_IN yang
+ * MASIH mode simulated (params.hw_mode != FBD_HW_REAL) di graph yang SEDANG
+ * aktif (bukan berasumsi id tertentu ada), supaya scan task tidak crash
+ * setelah graph diganti lewat POST /api/program dengan node id berbeda.
+ * Node dengan hw_mode "real" dibaca dari GPIO fisik sungguhan di
+ * fbd_graph_execute_cycle() (lihat fbd_graph.c evaluate_node), inputs[0]
+ * di sini diabaikan untuk node itu - aman untuk tetap di-set. */
 static void simulate_digital_inputs(fbd_graph_t *graph)
 {
     for (size_t i = 0; i < graph->node_count; ++i) {
-        if (graph->nodes[i].type == FBD_NODE_DIGITAL_IN) {
+        if (graph->nodes[i].type == FBD_NODE_DIGITAL_IN &&
+            graph->nodes[i].params.hw_mode != FBD_HW_REAL) {
             graph->nodes[i].inputs[0] = fbd_make_bool(true);
         }
     }
@@ -93,6 +98,13 @@ void app_main(void)
 
     logic_engine_init(&s_legacy_program);
     build_default_graph(&s_active_graph);
+
+    /* Backend real selalu tersedia di firmware device fisik - node individual
+     * memilih simulated/real lewat params.hw_mode masing-masing (dual backend,
+     * plan.md §3), bukan lewat backend global. Default node baru tetap
+     * "simulated" (lihat fbd_json.c parse_hw_mode) sampai user eksplisit
+     * ganti ke "real" di editor atau JSON. */
+    fbd_hw_set_backend(fbd_hw_real_backend());
 
     wifi_mgr_start_apsta();
     web_ui_start(&s_legacy_program, &s_active_graph);

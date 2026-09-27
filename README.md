@@ -46,8 +46,29 @@ editor visual berbasis Drawflow yang di-hosting langsung dari ESP32-S3.
   tombol Save/Load) — logic-nya sudah terbukti benar lewat test headless
   + endpoint HTTP, tapi interaksi UI itu sendiri (event listener Drawflow,
   render form params di node) belum diklik langsung oleh manusia.
-- **Berikutnya:** I/O fisik Level 1 (ADC/PWM/servo, simulated dulu baru
-  real) dan Level 2 (I2C primitive, WiFi sebagai system variable).
+- **Selesai:** dual backend (plan.md §3) untuk I/O fisik Level 1 —
+  `digital_input`/`digital_output`/`analog_input`/`pwm_output`/`servo`
+  masing-masing punya `params.hw_mode` (`"simulated"` atau `"real"`),
+  dipilih per-node lewat function pointer di
+  `components/fbd_core/fbd_hw_backend.h`:
+  - `fbd_hw_sim.c` — tidak menyentuh register apa pun, dites di host
+    (`test_host/fbd_hw_test.c`).
+  - `fbd_hw_real.c` — driver ESP-IDF nyata (`gpio`, `adc_oneshot`, `ledc`).
+    Init hardware (`gpio_config`/`ledc_channel_config`/dst) dipanggil
+    sekali per node (`state.hw_initialized`), bukan tiap scan cycle.
+  - Validasi pin: `POST /api/program` menolak `hw_mode: "real"` pada
+    strapping pin (GPIO0/3/45/46), pin USB-JTAG (GPIO19/20), atau pin
+    SPI flash/PSRAM (GPIO26-37) — lihat [schema.md](schema.md). Mode
+    `simulated` tidak divalidasi (tidak pernah menyentuh GPIO fisik).
+  - **Diverifikasi di hardware nyata:** `digital_input(pin=4, real,
+    pullup)` → `digital_output(pin=5, real)` di-POST ke device, scan
+    cycle tetap stabil tanpa crash. **Belum dikonfirmasi manusia:**
+    pengukuran multimeter langsung (tombol fisik di GPIO4 → LED/multimeter
+    di GPIO5).
+  - Editor: slider (bukan number input polos) untuk `analog_input.sim_value`
+    di panel Properties, sesuai kriteria spec 05.
+- **Berikutnya:** Level 2 (I2C primitive register-level, WiFi sebagai
+  system variable read-only).
 
 ### Bug signifikan yang ditemukan & diperbaiki selama verifikasi hardware
 - **Stack overflow di `fbd_json_parse()`**: `sizeof(fbd_graph_t)` ~19KB,
@@ -147,7 +168,7 @@ Xtensa/RISC-V ESP dan tidak bisa menghasilkan binary native PC.
 - [x] Runtime graph dengan topological sort + dual-task FreeRTOS
 - [x] Schema JSON di-freeze + endpoint save/load
 - [x] Editor visual Drawflow
-- [ ] Level 1 — I/O fisik (ADC/PWM/servo), simulated dulu baru real
+- [x] Level 1 — I/O fisik (digital/ADC/PWM/servo), dual backend simulated/real
 - [ ] Level 2 — I2C primitive register-level + WiFi sebagai system variable
 - [ ] Live update program tanpa reboot, dual-buffer graph swap
 - [ ] Level 3 (SPI/I2S/CAN/dst) — **ditunda total**, bukan roadmap aktif

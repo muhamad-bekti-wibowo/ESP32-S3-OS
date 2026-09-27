@@ -69,6 +69,15 @@ function fieldInputHtml(field, value) {
     if (field.type === 'checkbox') {
         return `<input type="checkbox" id="${id}" df-field="${field.key}" ${value ? 'checked' : ''}>`;
     }
+    if (field.type === 'range') {
+        /* Slider dengan angka live di sebelahnya - dipakai analog_input.sim_value
+         * (spec 05: "slider untuk analog_input"), bukan number input polos. */
+        return `<div class="properties-range-row">
+            <input type="range" id="${id}" df-field="${field.key}" min="${field.min}" max="${field.max}" value="${value}"
+                   oninput="document.getElementById('${id}-out').textContent = this.value">
+            <span id="${id}-out" class="properties-range-value">${value}</span>
+        </div>`;
+    }
     if (field.type === 'number') {
         return `<input type="number" id="${id}" df-field="${field.key}" value="${value}">`;
     }
@@ -134,7 +143,7 @@ function initEditor() {
         if (!fieldKey || selectedDfId === null) return;
         const nodeData = editor.getNodeFromId(selectedDfId);
         let value = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
-        if (e.target.type === 'number') value = parseFloat(value);
+        if (e.target.type === 'number' || e.target.type === 'range') value = parseFloat(value);
         nodeData.data.params[fieldKey] = value;
         editor.updateNodeDataFromId(selectedDfId, nodeData.data);
     });

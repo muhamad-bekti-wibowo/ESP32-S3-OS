@@ -1,4 +1,5 @@
 #include "fbd_graph.h"
+#include "fbd_hw_backend.h"
 #include <string.h>
 
 void fbd_graph_init(fbd_graph_t *g)
@@ -135,12 +136,79 @@ static fbd_value_t evaluate_node(fbd_node_t *node, fbd_var_store_t *vars, uint32
             return fbd_eval_tp(in[0], node->params.delay_ms, now_ms, &node->state.timer);
         case FBD_NODE_CTU:
             return fbd_eval_ctu(in[0], in[1], node->params.preset, &node->state.counter);
-        case FBD_NODE_DIGITAL_IN:
-        case FBD_NODE_DIGITAL_OUT:
-            /* Level 1 - implementasi hardware ditambahkan di spec 05.
-             * Untuk sekarang cukup pass-through supaya bisa dites di host
-             * lewat manipulasi outputs[0]/inputs[0] langsung. */
+        case FBD_NODE_DIGITAL_IN: {
+            /* Backend simulated: no-op, nilai tetap datang dari inputs[0]
+             * yang di-set scan task/test (pass-through) - supaya test host
+             * lama (set inputs[0] manual) tidak perlu berubah. Backend real:
+             * init sekali (gpio_config), lalu baca GPIO fisik sungguhan
+             * tiap cycle, abaikan inputs[0]. */
+            if (node->params.hw_mode != FBD_HW_REAL) {
+                return in[0];
+            }
+            const fbd_hw_backend_t *hw = fbd_hw_get_backend();
+            if (!node->state.hw_initialized) {
+                hw->digital_init_input(node->params.pin, node->params.pin_mode);
+                node->state.hw_initialized = true;
+            }
+            bool level = hw->digital_read(node->params.pin);
+            return fbd_make_bool(node->params.invert ? !level : level);
+        }
+        case FBD_NODE_DIGITAL_OUT: {
+            bool level = fbd_to_bool(in[0]);
+            if (node->params.hw_mode == FBD_HW_REAL) {
+                const fbd_hw_backend_t *hw = fbd_hw_get_backend();
+                if (!node->state.hw_initialized) {
+                    hw->digital_init_output(node->params.pin);
+                    node->state.hw_initialized = true;
+                }
+                hw->digital_write(node->params.pin, node->params.invert ? !level : level);
+            }
             return in[0];
+        }
+        case FBD_NODE_ANALOG_IN: {
+            const fbd_hw_backend_t *hw = fbd_hw_get_backend();
+            if (node->params.hw_mode == FBD_HW_REAL) {
+                if (!node->state.hw_initialized) {
+                    hw->analog_init(node->params.pin, node->params.resolution, node->params.attenuation);
+                    node->state.hw_initialized = true;
+                }
+                fbd_value_t dummy = fbd_make_empty();
+                return hw->analog_read(node->params.pin, node->params.resolution,
+                                        node->params.attenuation, dummy);
+            }
+            return hw->analog_read(node->params.pin, node->params.resolution,
+                                    node->params.attenuation, node->params.sim_value);
+        }
+        case FBD_NODE_PWM_OUT: {
+            float duty_percent = fbd_to_float(in[0]);
+            uint32_t max_duty = (1u << node->params.resolution) - 1u;
+            uint32_t duty = (uint32_t)((duty_percent / 100.0f) * (float)max_duty);
+            if (node->params.hw_mode == FBD_HW_REAL) {
+                const fbd_hw_backend_t *hw = fbd_hw_get_backend();
+                if (!node->state.hw_initialized) {
+                    hw->pwm_init(node->params.pin, node->params.frequency, node->params.resolution);
+                    node->state.hw_initialized = true;
+                }
+                hw->pwm_write(node->params.pin, duty);
+            }
+            /* outputs[0] tetap nilai duty% asli (bukan raw duty register) -
+             * dipakai UI utk indikator, sesuai spec 05 "tampilkan angka Freq/Duty". */
+            return in[0];
+        }
+        case FBD_NODE_SERVO: {
+            float angle = fbd_to_float(in[0]);
+            if (angle < 0.0f) angle = 0.0f;
+            if (angle > 180.0f) angle = 180.0f;
+            if (node->params.hw_mode == FBD_HW_REAL) {
+                const fbd_hw_backend_t *hw = fbd_hw_get_backend();
+                if (!node->state.hw_initialized) {
+                    hw->servo_init(node->params.pin, node->params.min_us, node->params.max_us);
+                    node->state.hw_initialized = true;
+                }
+                hw->servo_write(node->params.pin, angle, node->params.min_us, node->params.max_us);
+            }
+            return fbd_make_float(angle);
+        }
         default:
             return fbd_make_empty();
     }

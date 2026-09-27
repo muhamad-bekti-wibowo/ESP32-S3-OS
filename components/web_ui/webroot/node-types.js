@@ -88,7 +88,7 @@ const NODE_TYPES = {
         fields: [{ key: 'preset', label: 'Preset', type: 'number', default: 3 }],
     },
 
-    // ---- I/O digital (Level 1 dasar) ----
+    // ---- I/O digital (Level 1) ----
     digital_input: {
         label: 'Digital In', inputs: 0, outputs: 1,
         fields: [
@@ -96,6 +96,8 @@ const NODE_TYPES = {
             { key: 'mode', label: 'Mode', type: 'select',
               options: ['pullup', 'pulldown', 'floating'], default: 'pullup' },
             { key: 'invert', label: 'Invert', type: 'checkbox', default: false },
+            { key: 'hw_mode', label: 'HW Mode', type: 'select',
+              options: ['simulated', 'real'], default: 'simulated' },
         ],
     },
     digital_output: {
@@ -103,6 +105,41 @@ const NODE_TYPES = {
         fields: [
             { key: 'pin', label: 'Pin', type: 'number', default: 0 },
             { key: 'invert', label: 'Invert', type: 'checkbox', default: false },
+            { key: 'hw_mode', label: 'HW Mode', type: 'select',
+              options: ['simulated', 'real'], default: 'simulated' },
+        ],
+    },
+
+    // ---- I/O analog & PWM (Level 1) ----
+    analog_input: {
+        label: 'Analog In', inputs: 0, outputs: 1,
+        fields: [
+            { key: 'pin', label: 'Pin', type: 'number', default: 4 },
+            { key: 'resolution', label: 'Resolution (bit)', type: 'number', default: 12 },
+            { key: 'attenuation', label: 'Attenuation (dB)', type: 'number', default: 11 },
+            { key: 'hw_mode', label: 'HW Mode', type: 'select',
+              options: ['simulated', 'real'], default: 'simulated' },
+            { key: 'sim_value', label: 'Sim Value', type: 'range', min: 0, max: 4095, default: 0 },
+        ],
+    },
+    pwm_output: {
+        label: 'PWM Out', inputs: 1, outputs: 0,
+        fields: [
+            { key: 'pin', label: 'Pin', type: 'number', default: 5 },
+            { key: 'frequency', label: 'Frequency (Hz)', type: 'number', default: 1000 },
+            { key: 'resolution', label: 'Resolution (bit)', type: 'number', default: 12 },
+            { key: 'hw_mode', label: 'HW Mode', type: 'select',
+              options: ['simulated', 'real'], default: 'simulated' },
+        ],
+    },
+    servo: {
+        label: 'Servo', inputs: 1, outputs: 0,
+        fields: [
+            { key: 'pin', label: 'Pin', type: 'number', default: 18 },
+            { key: 'min_us', label: 'Min us', type: 'number', default: 500 },
+            { key: 'max_us', label: 'Max us', type: 'number', default: 2500 },
+            { key: 'hw_mode', label: 'HW Mode', type: 'select',
+              options: ['simulated', 'real'], default: 'simulated' },
         ],
     },
 };
