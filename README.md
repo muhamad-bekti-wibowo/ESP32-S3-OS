@@ -18,51 +18,79 @@ editor visual berbasis Drawflow yang di-hosting langsung dari ESP32-S3.
 - **Selesai:** runtime graph ber-id (`fbd_graph_t`) dengan topological sort
   (Kahn's algorithm) dan scan cycle FreeRTOS terpisah pinned ke Core 1
   (web server tetap di Core 0). Lihat `components/fbd_core/fbd_graph.*`
-  dan `main/main.c`. Endpoint web (`POST /api/program`) masih format v1
-  lama (`logic_engine`), belum terhubung ke `fbd_graph` — itu pekerjaan
-  tahap berikutnya (freeze schema JSON baru + endpoint save/load).
-- Semua node/graph di atas dites di `test_host/` (PC, tanpa ESP32/idf.py)
-  sebelum diintegrasikan ke firmware. **Diverifikasi di hardware fisik
-  (ESP32-S3 nyata via `idf.py flash monitor`):** `app_main` jalan di
-  Core 0, `fbd_scan_task` jalan di Core 1, TON delay 2000ms transisi
-  output tepat waktu (0 di t=1-2s, jadi 1 di t=3s), dan scan cycle log
-  tetap konsisten setiap ~1000ms tanpa gap saat endpoint HTTP disengaja
-  delay 2 detik — membuktikan Core 0 (web server) tidak menahan Core 1
-  (scan cycle).
-- **Berikutnya:** freeze schema JSON baru + endpoint save/load yang
-  terhubung ke `fbd_graph`, lalu editor visual berbasis Drawflow, lalu
-  I/O fisik Level 1 (ADC/PWM/servo) dan Level 2 (I2C primitive, WiFi
-  sebagai system variable).
+  dan `main/main.c`.
+- **Selesai:** schema JSON di-freeze (lihat [schema.md](schema.md)) dan
+  endpoint `GET`/`POST /api/program` terhubung langsung ke `fbd_graph`
+  (parser/serializer di `components/fbd_core/fbd_json.*`). `POST` menolak
+  JSON invalid atau graph cyclic tanpa mengubah graph aktif; `GET`
+  mengembalikan graph aktif sesuai schema.md. Endpoint `/api/status`
+  (v1/`logic_engine`) dipertahankan untuk debug selama migrasi.
+- Semua parser/graph di atas dites di `test_host/` (PC, tanpa ESP32/idf.py)
+  sebelum diintegrasikan ke firmware, DAN diverifikasi di hardware fisik
+  (ESP32-S3 nyata via `idf.py flash monitor`): `app_main` di Core 0,
+  `fbd_scan_task` di Core 1, TON timing benar, scan cycle tidak telat
+  saat HTTP delay disengaja, `POST`/`GET /api/program` round-trip sukses,
+  cyclic link ditolak dengan status 400 tanpa mengubah graph aktif.
+- Firmware WiFi mode APSTA (`wifi_mgr_start_apsta`): AP `ESP32-WebLogic`
+  tetap aktif, ditambah koneksi STA ke jaringan rumah — memudahkan akses
+  device dari PC dev tanpa pindah koneksi WiFi manual berulang kali.
+- **Berikutnya:** editor visual berbasis Drawflow, lalu I/O fisik Level 1
+  (ADC/PWM/servo) dan Level 2 (I2C primitive, WiFi sebagai system
+  variable).
 
-## Arsitektur (v1 — sedang bermigrasi ke runtime FBD)
+### Bug signifikan yang ditemukan & diperbaiki selama verifikasi hardware
+- **Stack overflow di `fbd_json_parse()`**: `sizeof(fbd_graph_t)` ~19KB,
+  jauh lebih besar dari stack task `httpd` (default 4-8KB). Versi awal
+  menaruh `fbd_graph_t tmp;` sebagai local variable di dalam
+  `fbd_json_parse()` — overflow ini merusak heap TLSF secara diam-diam
+  dan crash baru terlihat jauh setelahnya (`cJSON_Delete()` berikutnya),
+  membuat request POST/GET terlihat seperti masalah jaringan padahal
+  bug ada di firmware. Diperbaiki dengan menulis langsung ke `*out_graph`
+  yang disediakan caller (scratch buffer statis), bukan local variable.
+  Lihat komentar di `fbd_json.h`/`fbd_json.c` untuk detail kontraknya.
 
-- **`components/logic_engine/`** — interpreter runtime. Program disusun
-  sebagai daftar *block* (const, input, output, compare, if_else, counter,
-  math) yang saling terhubung lewat referensi index ("wire"). Dieksekusi
-  tiap scan cycle (~50 Hz), mirip siklus scan PLC.
+## Arsitektur
+
+- **`components/fbd_core/`** — inti runtime FBD: `FBDValue` tagged union
+  (`fbd_value.*`), node Level 0 (`fbd_nodes.*`), graph ber-id + topological
+  sort (`fbd_graph.*`), parser/serializer JSON sesuai [schema.md](schema.md)
+  (`fbd_json.*`).
 - **`components/web_ui/`** — HTTP server (esp_http_server) yang:
   - menyajikan halaman editor visual drag-drop dari SPIFFS (`webroot/index.html`)
-  - `POST /api/program` — menerima definisi program dalam JSON, memuatnya ke logic_engine
-  - `GET /api/status` — mengembalikan nilai output tiap block untuk debug/monitor
-- **`components/wifi_mgr/`** — WiFi Access Point sederhana
-  (SSID `ESP32-WebLogic`, password `logic1234`, IP `192.168.4.1`).
+  - `POST /api/program` — terima JSON sesuai schema.md, validasi
+    (parse + topological sort), terapkan ke graph aktif kalau sukses
+  - `GET /api/program` — dump graph aktif sesuai schema.md
+  - `GET /api/status` — nilai output block v1/`logic_engine` (debug, akan
+    dipensiunkan setelah migrasi penuh)
+- **`components/wifi_mgr/`** — WiFi APSTA: Access Point
+  (SSID `ESP32-WebLogic`, password `logic1234`, IP `192.168.4.1`) DAN
+  koneksi STA ke jaringan rumah, untuk kemudahan dev.
+- **`components/logic_engine/`** — interpreter v1 (block+index array),
+  dipertahankan sementara hanya untuk `/api/status`, akan dihapus setelah
+  migrasi ke `fbd_graph` selesai penuh.
 
 ## Format program JSON
 
+Lihat [schema.md](schema.md) untuk spesifikasi lengkap (semua tipe node
+Level 0 dengan contoh `params`, aturan `links`, versioning). Contoh
+singkat:
+
 ```json
 {
-  "blocks": [
-    { "name": "b0", "type": "input",  "in": [], "cfg": { "gpio": 0, "analog": false } },
-    { "name": "b1", "type": "const",  "in": [], "cfg": { "value": 1 } },
-    { "name": "b2", "type": "compare","in": [0, 1], "cfg": { "op": "==" } },
-    { "name": "b3", "type": "output", "in": [2], "cfg": { "gpio": 2 } }
+  "version": 1,
+  "nodes": [
+    { "id": "n1", "type": "digital_input", "params": { "pin": 4, "mode": "pullup", "invert": false } },
+    { "id": "n2", "type": "ton", "params": { "delay_ms": 2000 } },
+    { "id": "n3", "type": "and", "params": {} },
+    { "id": "n4", "type": "digital_output", "params": { "pin": 2, "invert": false } }
+  ],
+  "links": [
+    { "from": { "node": "n1", "port": 0 }, "to": { "node": "n3", "port": 0 } },
+    { "from": { "node": "n2", "port": 0 }, "to": { "node": "n3", "port": 1 } },
+    { "from": { "node": "n3", "port": 0 }, "to": { "node": "n4", "port": 0 } }
   ]
 }
 ```
-
-`in` berisi index block lain (bukan nama) sebagai sumber tiap input port.
-Urutan array `blocks` menentukan urutan evaluasi — block yang dipakai
-sebagai input harus didefinisikan lebih dulu.
 
 ## Build & Flash
 
@@ -92,7 +120,7 @@ Xtensa/RISC-V ESP dan tidak bisa menghasilkan binary native PC.
 
 - [x] Level 0 — Logic/Math/Timer/Data murni software (`fbd_core`)
 - [x] Runtime graph dengan topological sort + dual-task FreeRTOS
-- [ ] Schema JSON di-freeze + endpoint save/load
+- [x] Schema JSON di-freeze + endpoint save/load
 - [ ] Editor visual Drawflow
 - [ ] Level 1 — I/O fisik (ADC/PWM/servo), simulated dulu baru real
 - [ ] Level 2 — I2C primitive register-level + WiFi sebagai system variable

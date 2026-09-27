@@ -1,5 +1,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 
@@ -10,14 +11,15 @@
 
 static const char *TAG = "app_main";
 
-/* logic_engine v1: tetap dipakai web_ui untuk endpoint /api/program dan
- * /api/status apa adanya (format JSON belum diganti - itu pekerjaan
- * spec 03). BELUM terhubung ke scan cycle fbd_graph di bawah. */
+/* logic_engine v1: tetap dipakai web_ui untuk endpoint /api/status apa
+ * adanya (format lama, dipertahankan untuk debug selama migrasi bertahap
+ * ke fbd_graph). BELUM terhubung ke scan cycle fbd_graph di bawah. */
 static logic_program_t s_legacy_program;
 
 /* fbd_graph: runtime scan cycle baru (graph ber-id + topological sort),
- * jalan di FreeRTOS task terpisah pinned ke Core 1. Diisi program default
- * untuk sekarang - endpoint web belum menulis ke sini (spec 03). */
+ * jalan di FreeRTOS task terpisah pinned ke Core 1. Bisa diganti sepenuhnya
+ * lewat POST /api/program (lihat web_ui.c) - fbd_scan_task TIDAK boleh
+ * berasumsi node "n1"/"n2"/dst masih ada setelah reload. */
 static fbd_graph_t s_active_graph;
 
 #define SCAN_PERIOD_MS 20  /* ~50 Hz, mirip laju scan PLC kecil */
@@ -43,9 +45,23 @@ static void build_default_graph(fbd_graph_t *g)
     }
 }
 
+/* Simulasi input digital_input: set true untuk semua node FBD_NODE_DIGITAL_IN
+ * di graph yang SEDANG aktif (bukan berasumsi id tertentu ada), supaya scan
+ * task tidak crash setelah graph diganti lewat POST /api/program dengan
+ * node id yang berbeda. Diganti dengan pembacaan GPIO fisik di spec 05. */
+static void simulate_digital_inputs(fbd_graph_t *graph)
+{
+    for (size_t i = 0; i < graph->node_count; ++i) {
+        if (graph->nodes[i].type == FBD_NODE_DIGITAL_IN) {
+            graph->nodes[i].inputs[0] = fbd_make_bool(true);
+        }
+    }
+}
+
 static void fbd_scan_task(void *pvParameters)
 {
     fbd_graph_t *graph = (fbd_graph_t *)pvParameters;
+    SemaphoreHandle_t graph_mutex = web_ui_get_graph_mutex();
     const TickType_t scan_interval = pdMS_TO_TICKS(SCAN_PERIOD_MS);
     TickType_t last_wake = xTaskGetTickCount();
 
@@ -54,21 +70,15 @@ static void fbd_scan_task(void *pvParameters)
     for (;;) {
         uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
 
-        /* Simulasi input sederhana: digital_input & trigger TON selalu
-         * true, supaya digital_output ikut menyala setelah delay_ms TON
-         * lewat. Diganti dengan pembacaan GPIO fisik di spec 05 (Level 1). */
-        size_t n1_idx = fbd_graph_find_node(graph, "n1");
-        size_t n2_idx = fbd_graph_find_node(graph, "n2");
-        graph->nodes[n1_idx].inputs[0] = fbd_make_bool(true);
-        graph->nodes[n2_idx].inputs[0] = fbd_make_bool(true);
-
+        xSemaphoreTake(graph_mutex, portMAX_DELAY);
+        simulate_digital_inputs(graph);
         fbd_graph_execute_cycle(graph, now_ms);
+        xSemaphoreGive(graph_mutex);
 
         static uint32_t last_log_ms = 0;
         if (now_ms - last_log_ms >= 1000) {
-            size_t n4_idx = fbd_graph_find_node(graph, "n4");
-            ESP_LOGI(TAG, "scan cycle t=%lums, digital_output=%d",
-                     (unsigned long)now_ms, fbd_to_bool(graph->nodes[n4_idx].outputs[0]));
+            ESP_LOGI(TAG, "scan cycle t=%lums, node_count=%u",
+                     (unsigned long)now_ms, (unsigned)graph->node_count);
             last_log_ms = now_ms;
         }
 
@@ -84,8 +94,8 @@ void app_main(void)
     logic_engine_init(&s_legacy_program);
     build_default_graph(&s_active_graph);
 
-    wifi_mgr_start_ap();
-    web_ui_start(&s_legacy_program);
+    wifi_mgr_start_apsta();
+    web_ui_start(&s_legacy_program, &s_active_graph);
 
     xTaskCreatePinnedToCore(fbd_scan_task, "fbd_scan", 4096, &s_active_graph, 5, NULL, 1);
 

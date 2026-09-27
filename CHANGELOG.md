@@ -4,6 +4,39 @@ Semua perubahan penting proyek ini dicatat di file ini.
 
 ## [Unreleased]
 
+### Added (schema JSON + endpoint save/load)
+- `schema.md`: schema JSON final untuk Level 0-1 — semua tipe node dengan
+  contoh `params` konkret, aturan `links` (`{node, port}` object, bukan
+  notasi string), aturan `params` vs `state`, versioning.
+- `components/fbd_core/fbd_json.*`: `fbd_json_parse()` (JSON → `fbd_graph_t`,
+  menolak seluruh document kalau ada satu error — bukan partial-load) dan
+  `fbd_json_serialize()` (`fbd_graph_t` → JSON). Round-trip dites di host.
+- `web_ui.c`: `POST /api/program` sekarang parse+compile ke scratch graph
+  dulu, baru diterapkan ke graph aktif kalau kedua langkah sukses (kalau
+  gagal, graph aktif tidak disentuh). `GET /api/program` dump graph aktif
+  sesuai schema.md. Endpoint dilindungi mutex (`web_ui_get_graph_mutex()`)
+  supaya tidak race dengan `fbd_scan_task` di Core 1 - bukan dual-buffer
+  proper (itu tahap berikutnya), cukup mencegah corruption.
+- `wifi_mgr_start_apsta()`: mode WiFi APSTA (AP `ESP32-WebLogic` + STA ke
+  jaringan rumah), dipakai `main.c` sebagai pengganti `wifi_mgr_start_ap()`
+  supaya PC dev bisa akses device tanpa pindah koneksi WiFi manual.
+
+### Fixed (ditemukan lewat verifikasi hardware nyata, bukan test host)
+- **Stack overflow di `fbd_json_parse()`**: fungsi ini menaruh
+  `fbd_graph_t tmp;` sebagai local variable (`sizeof` ~19KB) di dalam
+  stack-nya sendiri, dipanggil dari task `httpd` yang stack-nya jauh
+  lebih kecil (4-8KB). Overflow ini merusak heap TLSF secara diam-diam;
+  crash (`assert failed: block_next ... !block_is_last(block)`) baru
+  muncul di `cJSON_Delete()` berikutnya, sehingga awalnya terlihat seperti
+  masalah jaringan (request timeout/connection reset), bukan bug
+  firmware. Diperbaiki dengan menulis langsung ke `*out_graph` yang
+  disediakan caller (scratch buffer statis di `web_ui.c`), bukan local
+  variable — lihat kontrak baru di `fbd_json.h`.
+- `program_post_handler`: `fbd_graph_t new_graph;` juga sempat dideklarasi
+  sebagai local variable di handler (bug serupa, ikut diperbaiki jadi
+  `static fbd_graph_t s_scratch_graph` sebelum root cause di atas
+  ditemukan).
+
 ### Added
 - `components/fbd_core/`: implementasi `FBDValue` (tagged union C, 16
   byte, tanpa alokasi heap) dan node Level 0 murni software (Logic

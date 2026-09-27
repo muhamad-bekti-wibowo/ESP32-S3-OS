@@ -4,9 +4,27 @@
 #include "esp_log.h"
 #include "esp_spiffs.h"
 #include "cJSON.h"
+#include "fbd_json.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 static const char *TAG = "web_ui";
-static logic_program_t *s_prog = NULL;
+static logic_program_t *s_legacy_prog = NULL;
+static fbd_graph_t *s_active_graph = NULL;
+
+/* sizeof(fbd_graph_t) ~19KB - JANGAN taruh sebagai local variable di stack
+ * handler httpd (stack task httpd hanya beberapa KB, overflow merusak heap
+ * TLSF secara diam-diam dan crash di tempat yang jauh dari akar masalahnya).
+ * Dipakai sebagai scratch buffer statis untuk parse+compile sebelum
+ * diterapkan ke *s_active_graph. */
+static fbd_graph_t s_scratch_graph;
+
+/* Melindungi *s_active_graph & s_scratch_graph dari race condition write
+ * (POST /api/program, Core 0, dan antar POST bersamaan) vs read
+ * (fbd_scan_task, Core 1). Ini BUKAN dual-buffer swap yang proper (itu
+ * spec 07) - cukup mencegah corruption saat write terjadi di tengah scan
+ * cycle sedang membaca graph yang sama. */
+static SemaphoreHandle_t s_graph_mutex = NULL;
 
 /* ---- Serve halaman editor dari SPIFFS ---- */
 
@@ -28,14 +46,29 @@ static esp_err_t index_get_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
-/* ---- POST /api/program : terima JSON definisi block, muat ke logic_engine ---- */
+static esp_err_t send_json_error(httpd_req_t *req, const char *msg)
+{
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "status", "error");
+    cJSON_AddStringToObject(root, "message", msg);
+    char *out = cJSON_PrintUnformatted(root);
+    httpd_resp_set_status(req, "400 Bad Request");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, out);
+    free(out);
+    cJSON_Delete(root);
+    return ESP_FAIL;
+}
+
+/* ---- POST /api/program : terima JSON sesuai schema.md, parse+compile ke
+ * graph baru, baru diterapkan ke active_graph kalau sukses (tidak ada
+ * partial-load: gagal validasi -> active_graph tidak disentuh). ---- */
 
 static esp_err_t program_post_handler(httpd_req_t *req)
 {
     int total = req->content_len;
     if (total <= 0 || total > 16384) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "ukuran body tidak valid");
-        return ESP_FAIL;
+        return send_json_error(req, "ukuran body tidak valid");
     }
 
     char *buf = malloc(total + 1);
@@ -49,8 +82,7 @@ static esp_err_t program_post_handler(httpd_req_t *req)
         int r = httpd_req_recv(req, buf + received, total - received);
         if (r <= 0) {
             free(buf);
-            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "gagal membaca body");
-            return ESP_FAIL;
+            return send_json_error(req, "gagal membaca body");
         }
         received += r;
     }
@@ -59,34 +91,71 @@ static esp_err_t program_post_handler(httpd_req_t *req)
     cJSON *json = cJSON_Parse(buf);
     free(buf);
     if (!json) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "JSON tidak valid");
-        return ESP_FAIL;
+        return send_json_error(req, "JSON tidak valid (parse error)");
     }
 
-    bool ok = logic_engine_load_json(s_prog, json);
+    /* Lock dipegang sepanjang parse+compile+swap supaya tidak ada POST lain
+     * yang menimpa s_scratch_graph di tengah proses (scratch buffer statis
+     * dipakai bersama, bukan per-request). */
+    xSemaphoreTake(s_graph_mutex, portMAX_DELAY);
+
+    char err[FBD_JSON_ERR_LEN] = {0};
+    bool ok = fbd_json_parse(json, &s_scratch_graph, err, sizeof(err));
     cJSON_Delete(json);
 
     if (!ok) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "gagal memuat program");
-        return ESP_FAIL;
+        xSemaphoreGive(s_graph_mutex);
+        ESP_LOGW(TAG, "POST /api/program ditolak: %s", err);
+        return send_json_error(req, err);
     }
+
+    if (!fbd_graph_compile(&s_scratch_graph)) {
+        xSemaphoreGive(s_graph_mutex);
+        ESP_LOGW(TAG, "POST /api/program ditolak: graph cyclic/invalid");
+        return send_json_error(req, "graph cyclic dependency - tidak bisa dikompilasi");
+    }
+
+    /* Validasi sukses - baru sekarang active_graph disentuh. */
+    *s_active_graph = s_scratch_graph;
+    unsigned node_count = (unsigned)s_scratch_graph.node_count;
+    unsigned link_count = (unsigned)s_scratch_graph.link_count;
+    xSemaphoreGive(s_graph_mutex);
+
+    ESP_LOGI(TAG, "POST /api/program sukses: %u node, %u link", node_count, link_count);
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, "{\"status\":\"ok\"}");
     return ESP_OK;
 }
 
-/* ---- GET /api/status : nilai output tiap block, untuk debug/monitor ---- */
+/* ---- GET /api/program : dump active_graph sesuai schema.md ---- */
+
+static esp_err_t program_get_handler(httpd_req_t *req)
+{
+    xSemaphoreTake(s_graph_mutex, portMAX_DELAY);
+    cJSON *root = fbd_json_serialize(s_active_graph);
+    xSemaphoreGive(s_graph_mutex);
+
+    char *out = cJSON_PrintUnformatted(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, out);
+    free(out);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+/* ---- GET /api/status : nilai output tiap block (v1/logic_engine, dipertahankan
+ * untuk debug selama migrasi bertahap ke fbd_graph). ---- */
 
 static esp_err_t status_get_handler(httpd_req_t *req)
 {
     cJSON *root = cJSON_CreateObject();
     cJSON *outputs = cJSON_CreateArray();
-    for (int i = 0; i < s_prog->block_count; i++) {
-        cJSON_AddItemToArray(outputs, cJSON_CreateNumber(logic_engine_get_output(s_prog, i)));
+    for (int i = 0; i < s_legacy_prog->block_count; i++) {
+        cJSON_AddItemToArray(outputs, cJSON_CreateNumber(logic_engine_get_output(s_legacy_prog, i)));
     }
     cJSON_AddItemToObject(root, "outputs", outputs);
-    cJSON_AddNumberToObject(root, "block_count", s_prog->block_count);
+    cJSON_AddNumberToObject(root, "block_count", s_legacy_prog->block_count);
 
     char *out = cJSON_PrintUnformatted(root);
     httpd_resp_set_type(req, "application/json");
@@ -110,14 +179,22 @@ static void mount_spiffs(void)
     }
 }
 
-void web_ui_start(logic_program_t *prog)
+void web_ui_start(logic_program_t *legacy_prog, fbd_graph_t *active_graph)
 {
-    s_prog = prog;
+    s_legacy_prog = legacy_prog;
+    s_active_graph = active_graph;
+    s_graph_mutex = xSemaphoreCreateMutex();
+
     mount_spiffs();
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.uri_match_fn = httpd_uri_match_wildcard;
     config.max_uri_handlers = 8;
+    /* Default 4096 terlalu kecil untuk program_post_handler/program_get_handler
+     * yang memanggil cJSON print/parse rekursif atas dokumen berisi puluhan
+     * node - pernah menyebabkan stack overflow yang merusak heap TLSF secara
+     * diam-diam (crash muncul jauh setelah request yang sebenarnya bermasalah). */
+    config.stack_size = 8192;
 
     httpd_handle_t server = NULL;
     if (httpd_start(&server, &config) != ESP_OK) {
@@ -126,12 +203,19 @@ void web_ui_start(logic_program_t *prog)
     }
 
     httpd_uri_t index_uri = { .uri = "/", .method = HTTP_GET, .handler = index_get_handler };
-    httpd_uri_t program_uri = { .uri = "/api/program", .method = HTTP_POST, .handler = program_post_handler };
+    httpd_uri_t program_post_uri = { .uri = "/api/program", .method = HTTP_POST, .handler = program_post_handler };
+    httpd_uri_t program_get_uri = { .uri = "/api/program", .method = HTTP_GET, .handler = program_get_handler };
     httpd_uri_t status_uri = { .uri = "/api/status", .method = HTTP_GET, .handler = status_get_handler };
 
     httpd_register_uri_handler(server, &index_uri);
-    httpd_register_uri_handler(server, &program_uri);
+    httpd_register_uri_handler(server, &program_post_uri);
+    httpd_register_uri_handler(server, &program_get_uri);
     httpd_register_uri_handler(server, &status_uri);
 
     ESP_LOGI(TAG, "web server siap");
+}
+
+SemaphoreHandle_t web_ui_get_graph_mutex(void)
+{
+    return s_graph_mutex;
 }
