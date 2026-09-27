@@ -4,6 +4,37 @@ Semua perubahan penting proyek ini dicatat di file ini.
 
 ## [Unreleased]
 
+### Added (dual-buffer graph swap + live update tanpa reboot)
+- `main.c`: dua instance `fbd_graph_t` tetap (`s_graph_a`/`s_graph_b`),
+  pointer `g_active_graph`/`g_standby_graph`, `volatile bool
+  g_reload_requested`. Scan task menukar pointer di AWAL tiap cycle
+  kalau flag di-set - tidak ada mutex/lock antara web handler dan scan
+  task (mutex sebelumnya, dari spec 03/06, dihapus sepenuhnya).
+- `web_ui.h`/`web_ui_start()`: signature berubah dari `fbd_graph_t
+  *active_graph` jadi `fbd_graph_t **active_graph_ptr` + `**standby_
+  graph_ptr` + `volatile bool *reload_requested_ptr` - `GET /api/program`
+  harus dereference dua kali karena pointer aktif bisa berubah kapan
+  saja (swap oleh scan task).
+- Auto-backup (`backup_program_file`/`prune_old_backups`): sebelum
+  overwrite `program.json` di SPIFFS, salinan lama disimpan sebagai
+  `program_backup_<uptime_ms>.json`. Retensi 5 backup terbaru - backup
+  tertua otomatis dihapus kalau melebihi batas.
+- Persistence (`load_program_file_at_startup`): `program.json` dimuat ke
+  standby graph + swap saat boot, jadi program yang di-Save bertahan
+  setelah reboot (sebelumnya hilang, kembali ke `build_default_graph()`).
+
+### Verified (hardware ESP32-S3 nyata)
+- Swap program (`c1=111` → `c2=222`) via `POST /api/program` selesai
+  <200ms, scan cycle log tetap konsisten tanpa gap - tidak ada crash/
+  corruption saat update terjadi ketika scan task sedang jalan.
+- Cyclic dependency di-`POST` saat device running → ditolak (400 Bad
+  Request), graph aktif TIDAK berubah, TIDAK ADA downtime.
+- Retensi backup diuji dengan 8 `POST` berturut-turut: backup ke-6 dan
+  seterusnya memicu penghapusan backup tertua (log `backup lama dihapus`),
+  tidak menumpuk tanpa batas.
+- Program bertahan setelah reboot fisik (log `program.json dimuat dari
+  SPIFFS`, `GET /api/program` mengembalikan graph yang sama).
+
 ### Added (Level 2: I2C primitive + WiFi system variable)
 - `i2c_bridge.h`: interface I2C register-level generik (`i2c_bridge_read_reg`/
   `write_reg`), TIDAK ADA mode simulated (I2C selalu bus fisik nyata, beda

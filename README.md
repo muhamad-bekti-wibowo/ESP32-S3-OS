@@ -96,8 +96,33 @@ editor visual berbasis Drawflow yang di-hosting langsung dari ESP32-S3.
     WiFi STA disimpan ke NVS lalu **dibaca ulang saat reboot** (bukan
     hardcode lagi) — dibuktikan lewat log boot `Config WiFi STA dimuat
     dari NVS`.
-- **Berikutnya:** live update program tanpa reboot (dual-buffer graph
-  swap).
+- **Selesai:** live update program tanpa reboot (dual-buffer graph swap,
+  tahap terakhir roadmap aktif — Level 3/SPI/I2S tetap ditunda total):
+  - `main.c`: dua instance `fbd_graph_t` tetap (`s_graph_a`/`s_graph_b`,
+    bukan alokasi dinamis), pointer `g_active_graph`/`g_standby_graph`,
+    dan `volatile bool g_reload_requested`. Scan task menukar pointer di
+    **awal tiap cycle** kalau flag di-set — tidak ada mutex/lock,
+    web handler tidak pernah menunggu scan task dan sebaliknya.
+  - `web_ui.c`: `POST /api/program` SELALU parse+compile ke standby graph
+    terlebih dulu; graph aktif baru tersentuh (via swap pointer di scan
+    task) setelah validasi lolos sepenuhnya.
+  - Auto-backup: sebelum overwrite `program.json` di SPIFFS, salinan lama
+    disimpan sebagai `program_backup_<uptime_ms>.json`. Retensi dibatasi
+    5 backup terbaru (`prune_old_backups`) — tidak menumpuk tanpa batas.
+  - Persistence: `program.json` dimuat otomatis saat boot (`load_program_
+    file_at_startup`), jadi program yang di-Save bertahan setelah reboot
+    (sebelumnya hilang, kembali ke default).
+  - Live monitor: field `outputs` di `GET /api/program` (dari spec 06)
+    memenuhi kebutuhan "indikator status node" — polling, bukan WebSocket.
+  - **Diverifikasi penuh di hardware nyata:** swap program (`c1=111` →
+    `c2=222`) selesai <200ms setelah `POST`, scan cycle log tetap
+    konsisten tanpa gap. Cyclic dependency di-`POST` saat device running →
+    ditolak (400), graph aktif tidak berubah, tidak ada downtime. Backup
+    file muncul tiap overwrite (dibuktikan lewat log), retensi 5 backup
+    teruji dengan 8 `POST` berturut-turut (backup ke-6 dst memicu hapus
+    backup tertua). Program bertahan setelah reboot fisik (log `program.
+    json dimuat dari SPIFFS`, `GET /api/program` mengembalikan graph yang
+    sama, bukan default).
 
 ### Bug signifikan yang ditemukan & diperbaiki selama verifikasi hardware
 - **Stack overflow di `fbd_json_parse()`**: `sizeof(fbd_graph_t)` ~19KB,
@@ -131,10 +156,13 @@ editor visual berbasis Drawflow yang di-hosting langsung dari ESP32-S3.
 - **`components/web_ui/`** — HTTP server (esp_http_server) yang:
   - menyajikan halaman editor visual drag-drop dari SPIFFS (`webroot/index.html`)
   - `POST /api/program` — terima JSON sesuai schema.md, validasi
-    (parse + topological sort), terapkan ke graph aktif kalau sukses
-  - `GET /api/program` — dump graph aktif sesuai schema.md
+    (parse + topological sort) ke **standby graph** (dual-buffer, tidak
+    langsung ke graph aktif), backup + persist `program.json` ke SPIFFS
+  - `GET /api/program` — dump graph aktif sesuai schema.md, termasuk
+    `outputs` tiap node (live monitor polling)
   - `GET /api/status` — nilai output block v1/`logic_engine` (debug, akan
     dipensiunkan setelah migrasi penuh)
+  - `GET`/`POST /api/network` — konfigurasi WiFi STA (tab System > Network)
 - **`components/wifi_mgr/`** — WiFi APSTA: Access Point
   (SSID `ESP32-WebLogic`, password `logic1234`, IP `192.168.4.1`) DAN
   koneksi STA (SSID/password dari NVS, fallback ke `MIFON` kalau belum
@@ -202,5 +230,9 @@ Xtensa/RISC-V ESP dan tidak bisa menghasilkan binary native PC.
 - [x] Editor visual Drawflow
 - [x] Level 1 — I/O fisik (digital/ADC/PWM/servo), dual backend simulated/real
 - [x] Level 2 — I2C primitive register-level + WiFi sebagai system variable
-- [ ] Live update program tanpa reboot, dual-buffer graph swap
+- [x] Live update program tanpa reboot, dual-buffer graph swap
 - [ ] Level 3 (SPI/I2S/CAN/dst) — **ditunda total**, bukan roadmap aktif
+
+**Roadmap aktif (spec 01-07) selesai.** Semua item checklist anti-gagal
+(plan.md §13) tercentang, termasuk verifikasi hardware nyata untuk tiap
+tahap. Level 3 tetap ditunda sampai ada kebutuhan konkret yang mendorongnya.

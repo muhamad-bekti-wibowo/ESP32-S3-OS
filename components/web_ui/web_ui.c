@@ -1,31 +1,40 @@
 #include "web_ui.h"
 #include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <dirent.h>
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_spiffs.h"
+#include "esp_timer.h"
 #include "cJSON.h"
 #include "fbd_json.h"
 #include "wifi_mgr.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/semphr.h"
 
 static const char *TAG = "web_ui";
 static logic_program_t *s_legacy_prog = NULL;
-static fbd_graph_t *s_active_graph = NULL;
+
+/* Dual-buffer graph (spec 07): pointer-ke-pointer supaya bisa mengikuti
+ * swap yang dilakukan scan task - lihat komentar lengkap di web_ui.h. */
+static fbd_graph_t **s_active_graph_ptr = NULL;
+static fbd_graph_t **s_standby_graph_ptr = NULL;
+static volatile bool *s_reload_requested_ptr = NULL;
 
 /* sizeof(fbd_graph_t) ~19KB - JANGAN taruh sebagai local variable di stack
  * handler httpd (stack task httpd hanya beberapa KB, overflow merusak heap
  * TLSF secara diam-diam dan crash di tempat yang jauh dari akar masalahnya).
- * Dipakai sebagai scratch buffer statis untuk parse+compile sebelum
- * diterapkan ke *s_active_graph. */
+ * Ini scratch buffer TERPISAH dari *standby_graph_ptr - parse dulu ke sini,
+ * baru di-copy ke standby setelah validasi lolos, supaya standby graph yang
+ * scan task lihat tidak pernah dalam keadaan setengah-jadi. */
 static fbd_graph_t s_scratch_graph;
 
-/* Melindungi *s_active_graph & s_scratch_graph dari race condition write
- * (POST /api/program, Core 0, dan antar POST bersamaan) vs read
- * (fbd_scan_task, Core 1). Ini BUKAN dual-buffer swap yang proper (itu
- * spec 07) - cukup mencegah corruption saat write terjadi di tengah scan
- * cycle sedang membaca graph yang sama. */
-static SemaphoreHandle_t s_graph_mutex = NULL;
+/* File program aktif + backup, di SPIFFS (spec 07 plan.md §11.2 "Auto-backup").
+ * Retensi dibatasi (bukan tumbuh tanpa batas) supaya tidak memenuhi partisi
+ * storage 2MB (lihat partitions.csv). */
+#define PROGRAM_FILE_PATH "/spiffs/program.json"
+#define PROGRAM_BACKUP_PREFIX "/spiffs/program_backup_"
+#define PROGRAM_BACKUP_MAX_COUNT 5
 
 /* ---- Serve file statis (editor Drawflow) dari SPIFFS ---- */
 
@@ -90,9 +99,101 @@ static esp_err_t send_json_error(httpd_req_t *req, const char *msg)
     return ESP_FAIL;
 }
 
+/* ---- Auto-backup program.json (spec 07 plan.md §11.2) ---- */
+
+/* Hapus backup tertua kalau sudah mencapai PROGRAM_BACKUP_MAX_COUNT, supaya
+ * backup tidak menumpuk tanpa batas dan memenuhi partisi storage. Nama file
+ * pakai counter monoton (uptime ms) - urut secara leksikografis = urut
+ * waktu, jadi cukup baca direktori & hapus yang angkanya paling kecil kalau
+ * jumlahnya sudah melebihi batas. */
+static void prune_old_backups(void)
+{
+    DIR *dir = opendir("/spiffs");
+    if (!dir) {
+        return;
+    }
+
+    char oldest_name[64] = {0};
+    long oldest_ts = -1;
+    int count = 0;
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (strncmp(entry->d_name, "program_backup_", 15) != 0) {
+            continue;
+        }
+        count++;
+        long ts = atol(entry->d_name + 15);
+        if (oldest_ts < 0 || ts < oldest_ts) {
+            oldest_ts = ts;
+            strncpy(oldest_name, entry->d_name, sizeof(oldest_name) - 1);
+        }
+    }
+    closedir(dir);
+
+    if (count > PROGRAM_BACKUP_MAX_COUNT && oldest_name[0] != '\0') {
+        char path[80];
+        snprintf(path, sizeof(path), "/spiffs/%s", oldest_name);
+        if (remove(path) == 0) {
+            ESP_LOGI(TAG, "backup lama dihapus: %s (retensi maks %d)", path, PROGRAM_BACKUP_MAX_COUNT);
+        }
+    }
+}
+
+/* Copy file program aktif lama ke program_backup_<uptime_ms>.json sebelum
+ * ditimpa. Aman dipanggil walau program.json belum pernah ada (belum pernah
+ * di-POST sebelumnya) - langsung return, tidak ada yang perlu di-backup. */
+static void backup_program_file(void)
+{
+    FILE *src = fopen(PROGRAM_FILE_PATH, "r");
+    if (!src) {
+        return; /* belum pernah ada program tersimpan - tidak ada yang di-backup */
+    }
+
+    char backup_path[64];
+    long uptime_ms = (long)(esp_timer_get_time() / 1000);
+    snprintf(backup_path, sizeof(backup_path), "%s%ld.json", PROGRAM_BACKUP_PREFIX, uptime_ms);
+
+    FILE *dst = fopen(backup_path, "w");
+    if (!dst) {
+        ESP_LOGW(TAG, "gagal buat file backup %s", backup_path);
+        fclose(src);
+        return;
+    }
+
+    char buf[512];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), src)) > 0) {
+        fwrite(buf, 1, n, dst);
+    }
+    fclose(src);
+    fclose(dst);
+
+    ESP_LOGI(TAG, "backup program lama disimpan: %s", backup_path);
+    prune_old_backups();
+}
+
+/* Tulis program.json baru ke SPIFFS - dipanggil SETELAH backup_program_file()
+ * dan SETELAH validasi (parse+compile) standby graph sukses. Kegagalan tulis
+ * di sini TIDAK membatalkan swap graph di RAM (device tetap jalan dengan
+ * logic baru), hanya berarti program hilang lagi kalau device reboot -
+ * di-log sebagai warning, bukan error fatal. */
+static void save_program_file(const char *json_str)
+{
+    FILE *f = fopen(PROGRAM_FILE_PATH, "w");
+    if (!f) {
+        ESP_LOGW(TAG, "gagal simpan program.json - program tidak akan bertahan setelah reboot");
+        return;
+    }
+    fwrite(json_str, 1, strlen(json_str), f);
+    fclose(f);
+}
+
 /* ---- POST /api/program : terima JSON sesuai schema.md, parse+compile ke
- * graph baru, baru diterapkan ke active_graph kalau sukses (tidak ada
- * partial-load: gagal validasi -> active_graph tidak disentuh). ---- */
+ * standby graph, baru di-swap ke active kalau sukses (dual-buffer, spec 07 -
+ * TIDAK ADA lagi modifikasi langsung ke active_graph seperti spec 03/06).
+ * TIDAK ADA partial-load: gagal validasi -> active_graph TIDAK disentuh,
+ * TIDAK ADA downtime. ---- */
 
 static esp_err_t program_post_handler(httpd_req_t *req)
 {
@@ -119,52 +220,59 @@ static esp_err_t program_post_handler(httpd_req_t *req)
     buf[total] = '\0';
 
     cJSON *json = cJSON_Parse(buf);
-    free(buf);
     if (!json) {
+        free(buf);
         return send_json_error(req, "JSON tidak valid (parse error)");
     }
-
-    /* Lock dipegang sepanjang parse+compile+swap supaya tidak ada POST lain
-     * yang menimpa s_scratch_graph di tengah proses (scratch buffer statis
-     * dipakai bersama, bukan per-request). */
-    xSemaphoreTake(s_graph_mutex, portMAX_DELAY);
 
     char err[FBD_JSON_ERR_LEN] = {0};
     bool ok = fbd_json_parse(json, &s_scratch_graph, err, sizeof(err));
     cJSON_Delete(json);
 
     if (!ok) {
-        xSemaphoreGive(s_graph_mutex);
+        free(buf);
         ESP_LOGW(TAG, "POST /api/program ditolak: %s", err);
         return send_json_error(req, err);
     }
 
     if (!fbd_graph_compile(&s_scratch_graph)) {
-        xSemaphoreGive(s_graph_mutex);
+        free(buf);
         ESP_LOGW(TAG, "POST /api/program ditolak: graph cyclic/invalid");
         return send_json_error(req, "graph cyclic dependency - tidak bisa dikompilasi");
     }
 
-    /* Validasi sukses - baru sekarang active_graph disentuh. */
-    *s_active_graph = s_scratch_graph;
+    /* Validasi sukses. Salin ke standby graph, lalu set flag - scan task
+     * yang melakukan swap sesungguhnya di awal cycle berikutnya (lihat
+     * main.c). Handler ini TIDAK PERNAH menunggu scan task memproses flag
+     * ini - request langsung dijawab sukses begitu standby graph siap. */
+    *(*s_standby_graph_ptr) = s_scratch_graph;
+    *s_reload_requested_ptr = true;
+
     unsigned node_count = (unsigned)s_scratch_graph.node_count;
     unsigned link_count = (unsigned)s_scratch_graph.link_count;
-    xSemaphoreGive(s_graph_mutex);
 
-    ESP_LOGI(TAG, "POST /api/program sukses: %u node, %u link", node_count, link_count);
+    backup_program_file();
+    save_program_file(buf);
+    free(buf);
+
+    ESP_LOGI(TAG, "POST /api/program sukses: %u node, %u link (live update, tanpa reboot)", node_count, link_count);
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, "{\"status\":\"ok\"}");
     return ESP_OK;
 }
 
-/* ---- GET /api/program : dump active_graph sesuai schema.md ---- */
+/* ---- GET /api/program : dump graph aktif sesuai schema.md.
+ * *s_active_graph_ptr bisa berubah kapan saja (scan task menukar pointer
+ * di awal tiap cycle) - dereference SEKALI ke variabel lokal sebelum
+ * serialize, supaya konsisten sepanjang satu request walau swap terjadi
+ * di tengah proses serialize (fbd_json_serialize baca dari snapshot
+ * pointer, bukan re-read *s_active_graph_ptr berulang kali). ---- */
 
 static esp_err_t program_get_handler(httpd_req_t *req)
 {
-    xSemaphoreTake(s_graph_mutex, portMAX_DELAY);
-    cJSON *root = fbd_json_serialize(s_active_graph);
-    xSemaphoreGive(s_graph_mutex);
+    const fbd_graph_t *graph = *s_active_graph_ptr;
+    cJSON *root = fbd_json_serialize(graph);
 
     char *out = cJSON_PrintUnformatted(root);
     httpd_resp_set_type(req, "application/json");
@@ -280,7 +388,7 @@ static void mount_spiffs(void)
     esp_vfs_spiffs_conf_t conf = {
         .base_path = "/spiffs",
         .partition_label = NULL,
-        .max_files = 5,
+        .max_files = 8, /* dinaikkan dari 5: webroot + program.json + beberapa backup sekaligus terbuka mungkin terjadi */
         .format_if_mount_failed = true,
     };
     esp_err_t ret = esp_vfs_spiffs_register(&conf);
@@ -289,13 +397,68 @@ static void mount_spiffs(void)
     }
 }
 
-void web_ui_start(logic_program_t *legacy_prog, fbd_graph_t *active_graph)
+/* Muat program.json dari SPIFFS ke standby graph, lalu minta swap - dipanggil
+ * SEKALI saat startup (spec 07: program yang di-Save harus bertahan setelah
+ * reboot). Kalau file tidak ada/rusak, biarkan graph default dari main.c
+ * yang tetap dipakai - tidak fatal. */
+static void load_program_file_at_startup(void)
+{
+    FILE *f = fopen(PROGRAM_FILE_PATH, "r");
+    if (!f) {
+        ESP_LOGI(TAG, "program.json belum ada, pakai graph default");
+        return;
+    }
+
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (size <= 0 || size > 16384) {
+        fclose(f);
+        ESP_LOGW(TAG, "program.json ukurannya tidak wajar (%ld byte), diabaikan", size);
+        return;
+    }
+
+    char *buf = malloc(size + 1);
+    if (!buf) {
+        fclose(f);
+        return;
+    }
+    fread(buf, 1, size, f);
+    buf[size] = '\0';
+    fclose(f);
+
+    cJSON *json = cJSON_Parse(buf);
+    free(buf);
+    if (!json) {
+        ESP_LOGW(TAG, "program.json tersimpan tapi tidak valid sebagai JSON, diabaikan");
+        return;
+    }
+
+    char err[FBD_JSON_ERR_LEN] = {0};
+    bool ok = fbd_json_parse(json, &s_scratch_graph, err, sizeof(err));
+    cJSON_Delete(json);
+    if (!ok || !fbd_graph_compile(&s_scratch_graph)) {
+        ESP_LOGW(TAG, "program.json tersimpan tapi gagal di-load (%s), pakai graph default", err);
+        return;
+    }
+
+    *(*s_standby_graph_ptr) = s_scratch_graph;
+    *s_reload_requested_ptr = true;
+    ESP_LOGI(TAG, "program.json dimuat dari SPIFFS (%u node)", (unsigned)s_scratch_graph.node_count);
+}
+
+void web_ui_start(logic_program_t *legacy_prog,
+                   fbd_graph_t **active_graph_ptr,
+                   fbd_graph_t **standby_graph_ptr,
+                   volatile bool *reload_requested_ptr)
 {
     s_legacy_prog = legacy_prog;
-    s_active_graph = active_graph;
-    s_graph_mutex = xSemaphoreCreateMutex();
+    s_active_graph_ptr = active_graph_ptr;
+    s_standby_graph_ptr = standby_graph_ptr;
+    s_reload_requested_ptr = reload_requested_ptr;
 
     mount_spiffs();
+    load_program_file_at_startup();
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.uri_match_fn = httpd_uri_match_wildcard;
@@ -330,9 +493,4 @@ void web_ui_start(logic_program_t *legacy_prog, fbd_graph_t *active_graph)
     httpd_register_uri_handler(server, &static_uri);
 
     ESP_LOGI(TAG, "web server siap");
-}
-
-SemaphoreHandle_t web_ui_get_graph_mutex(void)
-{
-    return s_graph_mutex;
 }
