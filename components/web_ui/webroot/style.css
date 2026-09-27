@@ -523,7 +523,14 @@ body.network-page {
     color: var(--text);
 }
 
+/* Drawflow bawaan set ".drawflow svg { position: absolute }" (dipakai
+ * untuk garis wire koneksi) - ini juga kena ke <svg> icon kita karena
+ * sama-sama di dalam .drawflow, jadi icon "lepas" dari flow layout dan
+ * menumpuk di pojok kiri-atas node, menabrak huruf pertama label.
+ * position:static memaksa icon ikut flow flex normal lagi. */
 .fbd-node-icon {
+    position: static;
+    display: block;
     width: 15px;
     height: 15px;
     flex-shrink: 0;
