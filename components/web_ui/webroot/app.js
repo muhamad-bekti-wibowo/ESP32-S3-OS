@@ -20,11 +20,15 @@ function setStatus(msg, isError) {
 
 function buildNodeHtml(type) {
     const def = NODE_TYPES[type];
+    /* Marker segitiga sengaja DI LUAR .fbd-node-title (bukan child-nya) -
+     * posisinya absolute relatif ke kartu node penuh (lihat style.css
+     * .fbd-node-marker), supaya selalu nempel di tepi bawah kartu, bukan
+     * ikut tinggi baris judul. */
     return `<div class="fbd-node-title">
         ${svgIcon(def.icon, 'fbd-node-icon')}
         <span class="fbd-node-label">${def.label}</span>
-        <span class="fbd-node-marker" aria-hidden="true"></span>
-    </div>`;
+    </div>
+    <span class="fbd-node-marker" aria-hidden="true"></span>`;
 }
 
 function defaultParams(type) {
