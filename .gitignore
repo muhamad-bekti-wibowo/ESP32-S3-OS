@@ -14,3 +14,7 @@ test_host/*.ilk
 # Editor
 .vscode/.vsix
 *.swp
+
+# Dokumen planning internal - jangan dipush ke remote publik
+/plan.md
+/specs/

@@ -8,25 +8,19 @@ Arah pengembangan: runtime Function Block Diagram (FBD) / virtual PLC
 open-source, dieksekusi dari JSON tanpa kompilasi ulang firmware, dengan
 editor visual berbasis Drawflow yang di-hosting langsung dari ESP32-S3.
 
-**Dokumen rencana lengkap:** [plan.md](plan.md) — arsitektur, skema data,
-roadmap peripheral 4 level, dan alasan tiap keputusan desain.
-**Spec eksekusi per tahap:** [specs/](specs/00-overview.md) — plan.md
-dipecah jadi tahap-tahap kecil yang bisa dikerjakan satu per satu, tiap
-tahap punya kriteria selesai eksplisit sebelum lanjut ke tahap berikutnya.
-
 ## Status implementasi
 
-| Spec | Fokus | Status |
-|---|---|---|
-| [01](specs/01-fbdvalue-core.md) | `FBDValue` tagged union + node Level 0, dites di host | Selesai — lihat `components/fbd_core/`, `test_host/` |
-| [02](specs/02-topo-sort-runtime.md) | Graph ber-id + topological sort + dual-task Core0/Core1 | Belum dikerjakan |
-| [03](specs/03-schema-freeze.md) | Freeze schema JSON + endpoint save/load | Belum dikerjakan |
-| [04](specs/04-drawflow-editor.md) | Editor visual Drawflow | Belum dikerjakan |
-| [05](specs/05-level1-io.md) | Level 1 I/O (analog/PWM/servo, simulated→real) | Belum dikerjakan |
-| [06](specs/06-level2-i2c-wifi.md) | Level 2 (I2C primitive + WiFi system variable) | Belum dikerjakan |
-| [07](specs/07-live-update.md) | Dual-buffer graph swap, live update tanpa reboot | Belum dikerjakan |
+- **Selesai:** `FBDValue` tagged union (16 byte, tanpa alokasi heap) dan
+  node Level 0 murni software — Logic (AND/OR/NOT/XOR/NAND/NOR/Compare),
+  Data (Constant, Variable), Math (ADD/SUB/MUL/DIV/MIN/MAX/ABS/SCALE/
+  CLAMP), Timing (TON/TOF/TP/Counter). Lihat `components/fbd_core/` dan
+  `test_host/` (27 test lolos, dijalankan tanpa ESP32/idf.py).
+- **Berikutnya:** migrasi runtime ke graph ber-id dengan topological sort
+  dan dual-task FreeRTOS (Core 0 web server, Core 1 scan cycle), lalu
+  editor visual berbasis Drawflow, lalu I/O fisik Level 1 (ADC/PWM/servo)
+  dan Level 2 (I2C primitive, WiFi sebagai system variable).
 
-## Arsitektur (v1 — akan bermigrasi bertahap sesuai specs/)
+## Arsitektur (v1 — sedang bermigrasi ke runtime FBD)
 
 - **`components/logic_engine/`** — interpreter runtime. Program disusun
   sebagai daftar *block* (const, input, output, compare, if_else, counter,
@@ -82,14 +76,11 @@ Xtensa/RISC-V ESP dan tidak bisa menghasilkan binary native PC.
 
 ## Roadmap
 
-Roadmap detail ada di [plan.md §5](plan.md) (4 level peripheral) dan
-[plan.md §12](plan.md) (prioritas eksekusi). Ringkasan:
-
-- [x] Level 0 — Logic/Math/Timer/Data murni software (`fbd_core`, spec 01)
-- [ ] Runtime graph dengan topological sort + dual-task FreeRTOS (spec 02)
-- [ ] Schema JSON di-freeze + endpoint save/load (spec 03)
-- [ ] Editor visual Drawflow (spec 04)
-- [ ] Level 1 — I/O fisik (ADC/PWM/servo), simulated dulu baru real (spec 05)
-- [ ] Level 2 — I2C primitive register-level + WiFi sebagai system variable (spec 06)
-- [ ] Live update program tanpa reboot, dual-buffer graph swap (spec 07)
+- [x] Level 0 — Logic/Math/Timer/Data murni software (`fbd_core`)
+- [ ] Runtime graph dengan topological sort + dual-task FreeRTOS
+- [ ] Schema JSON di-freeze + endpoint save/load
+- [ ] Editor visual Drawflow
+- [ ] Level 1 — I/O fisik (ADC/PWM/servo), simulated dulu baru real
+- [ ] Level 2 — I2C primitive register-level + WiFi sebagai system variable
+- [ ] Live update program tanpa reboot, dual-buffer graph swap
 - [ ] Level 3 (SPI/I2S/CAN/dst) — **ditunda total**, bukan roadmap aktif
