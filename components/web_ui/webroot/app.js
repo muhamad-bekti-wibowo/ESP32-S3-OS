@@ -443,6 +443,19 @@ async function saveProgram() {
     }
 }
 
+/* Drawflow menghitung ulang path SVG kabel koneksi HANYA saat node
+ * digeser (drag) - path yang di-import lewat editor.import() memakai
+ * posisi node apa adanya, tapi tinggi/lebar kartu bisa berbeda dari saat
+ * link itu terakhir disimpan (mis. setelah update CSS node - padding,
+ * marker, dst berubah). Hasilnya kabel terlihat "melenceng" dari
+ * lingkaran port sampai node digeser manual sekali. Dipanggil sekali per
+ * node setelah import supaya user tidak perlu drag manual. */
+function refreshAllConnectionPaths() {
+    Object.keys(editor.drawflow.drawflow.Home.data).forEach(dfId => {
+        editor.updateConnectionNodes(`node-${dfId}`);
+    });
+}
+
 async function loadProgram() {
     try {
         const res = await fetch('/api/program');
@@ -454,6 +467,7 @@ async function loadProgram() {
         const drawflowData = schemaToDrawflow(schema);
         editor.clear();
         editor.import(drawflowData);
+        refreshAllConnectionPaths();
         selectNode(null);
         setStatus('Load sukses');
     } catch (err) {
