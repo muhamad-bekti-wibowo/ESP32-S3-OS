@@ -525,18 +525,26 @@ body.network-page {
     color: var(--text);
 }
 
-/* Drawflow bawaan set ".drawflow svg { position: absolute }" (dipakai
- * untuk garis wire koneksi) - ini juga kena ke <svg> icon kita karena
- * sama-sama di dalam .drawflow, jadi icon "lepas" dari flow layout dan
- * menumpuk di pojok kiri-atas node, menabrak huruf pertama label.
- * position:static memaksa icon ikut flow flex normal lagi. */
-.fbd-node-icon {
-    position: static;
-    display: block;
-    width: 15px;
-    height: 15px;
-    flex-shrink: 0;
+/* Drawflow bawaan set ".drawflow svg { position: absolute; z-index: 0 }"
+ * (dipakai untuk garis wire koneksi) - ini juga kena ke <svg> icon kita
+ * karena sama-sama di dalam .drawflow, jadi icon "lepas" dari flow
+ * layout dan menumpuk di pojok kiri-atas node, menabrak huruf pertama
+ * label. !important dipakai karena aturan Drawflow ada di file vendor
+ * yang di-load SETELAH style.css secara urutan sumber tidak relevan di
+ * sini (spesifisitas selector sama-sama 1 class - !important memastikan
+ * menang tanpa bergantung urutan <link> di index.html). Selector
+ * ".drawflow-node.fbd-node .fbd-node-icon" juga dipakai sebagai lapis
+ * kedua untuk menaikkan specificity kalau !important saja tidak cukup
+ * di browser tertentu. */
+.fbd-node-icon,
+.drawflow-node.fbd-node .fbd-node-icon {
+    position: static !important;
+    display: inline-block !important;
+    width: 15px !important;
+    height: 15px !important;
+    flex: 0 0 15px;
     color: var(--accent);
+    vertical-align: middle;
 }
 
 .fbd-node-label {

@@ -290,11 +290,28 @@ function selectNode(dfId) {
 
 /* ---- Setup Drawflow ---- */
 
+/* Drawflow bawaan panggil e.preventDefault() pada contextmenu (dipakai
+ * untuk menu hapus node klik-kanan bawaannya) - ini menutup menu klik-
+ * kanan asli browser (Inspect Element dkk) di seluruh area canvas.
+ * Dipasang di CAPTURE phase (argumen ketiga true) supaya listener kita
+ * jalan LEBIH DULU dari listener Drawflow (yang dipasang di bubble
+ * phase) dan stopImmediatePropagation() mencegah listener Drawflow
+ * sempat jalan sama sekali - klik kanan jadi menu browser normal,
+ * bukan menu Drawflow. Fitur hapus node tetap ada lewat tombol Hapus
+ * merah di panel Properties (lihat renderProperties()), jadi tidak
+ * kehilangan fungsi apa pun dengan mematikan ini. */
+function disableDrawflowContextMenu(container) {
+    container.addEventListener('contextmenu', (e) => {
+        e.stopImmediatePropagation();
+    }, true);
+}
+
 function initEditor() {
     const container = document.getElementById('drawflow');
     editor = new Drawflow(container);
     editor.reroute = true;
     editor.start();
+    disableDrawflowContextMenu(container);
 
     editor.on('nodeSelected', (dfId) => selectNode(dfId));
     editor.on('nodeUnselected', () => selectNode(null));
