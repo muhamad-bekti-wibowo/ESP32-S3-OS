@@ -67,6 +67,7 @@ static const char *node_type_to_str(fbd_node_type_t type)
         case FBD_NODE_TON:          return "ton";
         case FBD_NODE_TOF:          return "tof";
         case FBD_NODE_TP:           return "tp";
+        case FBD_NODE_OSC:          return "osc";
         case FBD_NODE_CTU:          return "ctu";
         case FBD_NODE_DIGITAL_IN:   return "digital_input";
         case FBD_NODE_DIGITAL_OUT:  return "digital_output";
@@ -281,6 +282,17 @@ static bool parse_params(const cJSON *params, fbd_node_t *node, char *err, size_
                 return false;
             }
             node->params.delay_ms = (uint32_t)cJSON_GetNumberValue(pulse_ms);
+            break;
+        }
+        case FBD_NODE_OSC: {
+            const cJSON *on_ms = cJSON_GetObjectItem(params, "on_ms");
+            const cJSON *off_ms = cJSON_GetObjectItem(params, "off_ms");
+            if (!on_ms || !off_ms) {
+                set_err(err, err_len, "osc: params.on_ms/off_ms wajib");
+                return false;
+            }
+            node->params.osc_on_ms = (uint32_t)cJSON_GetNumberValue(on_ms);
+            node->params.osc_off_ms = (uint32_t)cJSON_GetNumberValue(off_ms);
             break;
         }
         case FBD_NODE_CTU: {
@@ -649,6 +661,10 @@ static cJSON *serialize_params(const fbd_node_t *node)
             break;
         case FBD_NODE_TP:
             cJSON_AddNumberToObject(params, "pulse_ms", node->params.delay_ms);
+            break;
+        case FBD_NODE_OSC:
+            cJSON_AddNumberToObject(params, "on_ms", node->params.osc_on_ms);
+            cJSON_AddNumberToObject(params, "off_ms", node->params.osc_off_ms);
             break;
         case FBD_NODE_CTU:
             cJSON_AddNumberToObject(params, "preset", node->params.preset);

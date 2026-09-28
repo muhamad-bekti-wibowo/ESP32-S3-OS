@@ -142,6 +142,43 @@ static void test_level1_analog_pwm_servo_roundtrip(void)
     cJSON_Delete(root2);
 }
 
+static void test_osc_roundtrip(void)
+{
+    const char *json =
+    "{ \"version\": 1, \"nodes\": ["
+    "  { \"id\": \"osc1\", \"type\": \"osc\", \"params\": { \"on_ms\": 300, \"off_ms\": 700 } }"
+    "], \"links\": [] }";
+
+    cJSON *root = cJSON_Parse(json);
+    fbd_graph_t g;
+    char err[FBD_JSON_ERR_LEN] = {0};
+    bool ok = fbd_json_parse(root, &g, err, sizeof(err));
+    CHECK(ok, "osc berhasil di-parse");
+    if (!ok) printf("  error: %s\n", err);
+    cJSON_Delete(root);
+
+    size_t idx = fbd_graph_find_node(&g, "osc1");
+    CHECK(g.nodes[idx].type == FBD_NODE_OSC, "osc1 bertipe FBD_NODE_OSC");
+    CHECK(g.nodes[idx].params.osc_on_ms == 300, "osc1 params.on_ms = 300");
+    CHECK(g.nodes[idx].params.osc_off_ms == 700, "osc1 params.off_ms = 700");
+
+    cJSON *serialized = fbd_json_serialize(&g);
+    char *serialized_str = cJSON_PrintUnformatted(serialized);
+
+    cJSON *root2 = cJSON_Parse(serialized_str);
+    fbd_graph_t g2;
+    bool ok2 = fbd_json_parse(root2, &g2, err, sizeof(err));
+    CHECK(ok2, "hasil serialize osc bisa di-parse ulang (round-trip)");
+
+    size_t idx2 = fbd_graph_find_node(&g2, "osc1");
+    CHECK(g2.nodes[idx2].params.osc_on_ms == 300, "round-trip: osc1 on_ms tetap 300");
+    CHECK(g2.nodes[idx2].params.osc_off_ms == 700, "round-trip: osc1 off_ms tetap 700");
+
+    free(serialized_str);
+    cJSON_Delete(serialized);
+    cJSON_Delete(root2);
+}
+
 static void test_hw_mode_default_simulated_when_omitted(void)
 {
     /* JSON lama (sebelum spec 05) tanpa field hw_mode sama sekali harus
@@ -317,6 +354,7 @@ int main(void)
     test_parse_example_from_schema();
     test_roundtrip();
     test_level1_analog_pwm_servo_roundtrip();
+    test_osc_roundtrip();
     test_hw_mode_default_simulated_when_omitted();
     test_i2c_and_sys_var_roundtrip();
     test_reject_unsafe_pin_when_real();

@@ -127,12 +127,27 @@ Contoh:
 | `ton` | `{ "delay_ms": 2000 }` | `{ "start_ms": 0, "running": false, "prev_input": false }` |
 | `tof` | `{ "delay_ms": 2000 }` | sama seperti `ton` |
 | `tp` | `{ "pulse_ms": 500 }` | sama seperti `ton` |
+| `osc` | `{ "on_ms": 500, "off_ms": 500 }` | sama seperti `ton` (`running` dipakai sebagai fase ON/OFF sekarang, bukan "sedang menghitung") |
 | `ctu` | `{ "preset": 3 }` | `{ "count": 0, "prev_clk": false }` |
 
 Contoh:
 ```json
 { "id": "t1", "type": "ton", "params": { "delay_ms": 2000 } }
 ```
+
+`osc` (osilator/clock generator) **tidak punya input** — output bergantian
+`true`/`false` terus-menerus tanpa dipicu apa pun, dimulai dari fase
+`false` (OFF) selama `off_ms`, lalu `true` (ON) selama `on_ms`, berulang.
+`on_ms`/`off_ms` independen: isi keduanya sama untuk blink simetris
+(paling umum, mis. LED berkedip rata), atau beda untuk pola asimetris
+(mis. `on_ms: 200, off_ms: 800` untuk kedip cepat).
+
+Contoh — LED berkedip tiap 1 detik (simetris):
+```json
+{ "id": "blink1", "type": "osc", "params": { "on_ms": 500, "off_ms": 500 } }
+{ "id": "led1", "type": "digital_output", "params": { "pin": 5, "invert": false, "hw_mode": "real" } }
+```
+(link: `blink1 → led1.in0`)
 
 ### I/O digital (Level 1)
 

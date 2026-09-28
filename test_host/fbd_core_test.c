@@ -129,6 +129,45 @@ static void test_timer_tof_tp(void)
     CHECK(fbd_to_bool(out) == false, "TP: setelah durasi pulsa lewat -> OFF walau input masih ON");
 }
 
+static void test_timer_osc(void)
+{
+    fbd_timer_state_t st = {0};
+    uint32_t now_ms = 0;
+
+    /* start_ms=0, running=false (fase awal OFF, sesuai zero-init) -
+     * cycle pertama now_ms=0: now-start(0) >= off_ms(0)? tergantung
+     * off_ms yang dipakai test. Pakai on_ms=300, off_ms=200 (asimetris,
+     * sesuai keputusan user: satu node, params bisa simetris/tidak). */
+    fbd_value_t out = fbd_eval_osc(300, 200, now_ms, &st);
+    /* now(0) - start(0) = 0 >= off_ms(200)? tidak (0 < 200) -> tetap OFF
+     * di cycle pertama ini KECUALI off_ms=0. Dites eksplisit di bawah. */
+    CHECK(fbd_to_bool(out) == false, "OSC: fase awal OFF, off_ms belum lewat -> tetap OFF");
+
+    now_ms = 200;
+    out = fbd_eval_osc(300, 200, now_ms, &st);
+    CHECK(fbd_to_bool(out) == true, "OSC: off_ms (200) lewat -> toggle ke ON");
+
+    now_ms = 350;
+    out = fbd_eval_osc(300, 200, now_ms, &st);
+    CHECK(fbd_to_bool(out) == true, "OSC: on_ms (300) belum lewat sejak toggle ke ON (t=200) -> masih ON");
+
+    now_ms = 500;
+    out = fbd_eval_osc(300, 200, now_ms, &st);
+    CHECK(fbd_to_bool(out) == false, "OSC: on_ms (300) lewat sejak t=200 -> toggle balik ke OFF");
+
+    /* Simetris: on_ms == off_ms, dipakai kasus paling umum (blink LED). */
+    fbd_timer_state_t st_sym = {0};
+    now_ms = 0;
+    out = fbd_eval_osc(500, 500, now_ms, &st_sym);
+    CHECK(fbd_to_bool(out) == false, "OSC simetris: t=0 -> OFF");
+    now_ms = 500;
+    out = fbd_eval_osc(500, 500, now_ms, &st_sym);
+    CHECK(fbd_to_bool(out) == true, "OSC simetris: t=500 -> toggle ON");
+    now_ms = 1000;
+    out = fbd_eval_osc(500, 500, now_ms, &st_sym);
+    CHECK(fbd_to_bool(out) == false, "OSC simetris: t=1000 -> toggle balik OFF");
+}
+
 static void test_counter_ctu(void)
 {
     fbd_counter_state_t st = {0};
@@ -157,6 +196,7 @@ int main(void)
     test_variable_store();
     test_timer_ton();
     test_timer_tof_tp();
+    test_timer_osc();
     test_counter_ctu();
 
     printf("\n%s (%d gagal)\n", g_fail == 0 ? "SEMUA TEST LOLOS" : "ADA TEST GAGAL", g_fail);

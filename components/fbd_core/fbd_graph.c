@@ -140,6 +140,8 @@ static fbd_value_t evaluate_node(fbd_node_t *node, fbd_var_store_t *vars, uint32
             return fbd_eval_tof(in[0], node->params.delay_ms, now_ms, &node->state.timer);
         case FBD_NODE_TP:
             return fbd_eval_tp(in[0], node->params.delay_ms, now_ms, &node->state.timer);
+        case FBD_NODE_OSC:
+            return fbd_eval_osc(node->params.osc_on_ms, node->params.osc_off_ms, now_ms, &node->state.timer);
         case FBD_NODE_CTU:
             return fbd_eval_ctu(in[0], in[1], node->params.preset, &node->state.counter);
         case FBD_NODE_DIGITAL_IN: {

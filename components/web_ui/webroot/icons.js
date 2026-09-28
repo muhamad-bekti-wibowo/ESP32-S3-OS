@@ -14,6 +14,7 @@ const NODE_ICONS = {
     scale:      '<path d="M4 16h16"/><path d="M7 16V9M12 16V5M17 16v-8"/>',
     timer:      '<circle cx="11" cy="12" r="7"/><path d="M11 8v4l3 2"/><path d="M9 2h4"/>',
     counter:    '<rect x="3" y="6" width="14" height="10" rx="2"/><path d="M9 9v4M13 9v4"/><path d="M21 10v4"/>',
+    osc:        '<path d="M2 16h4V8h5v8h5V8h5v8h2"/>',
     digital_in: '<rect x="3" y="7" width="10" height="8" rx="1"/><path d="M21 11h-8"/><circle cx="8" cy="11" r="1.5"/>',
     digital_out:'<rect x="11" y="7" width="10" height="8" rx="1"/><path d="M3 11h8"/><circle cx="16" cy="11" r="1.5"/>',
     analog_in:  '<path d="M3 12c2-4 3-6 4-6s2 8 3 8 2-8 3-8 2 6 4 6"/><path d="M20 12h1"/>',

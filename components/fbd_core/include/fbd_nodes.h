@@ -71,6 +71,15 @@ fbd_value_t fbd_eval_tof(fbd_value_t input, uint32_t delay_ms, uint32_t now_ms, 
  * sampai pulsa selesai. */
 fbd_value_t fbd_eval_tp(fbd_value_t input, uint32_t pulse_ms, uint32_t now_ms, fbd_timer_state_t *state);
 
+/* OSC (osilator/clock generator): output bergantian true/false terus-
+ * menerus tanpa input - true selama on_ms, lalu false selama off_ms,
+ * berulang. on_ms/off_ms independen (isi sama untuk osilator simetris,
+ * beda untuk pola blink asimetris mis. kedip cepat). Dipakai state.timer
+ * yang sama dengan TON/TOF/TP (start_ms = kapan fase sekarang mulai,
+ * running = fase sekarang ON/OFF) - reused, bukan struct baru, supaya
+ * fbd_node_state_t tidak perlu field tambahan. */
+fbd_value_t fbd_eval_osc(uint32_t on_ms, uint32_t off_ms, uint32_t now_ms, fbd_timer_state_t *state);
+
 typedef struct {
     int32_t count;
     bool prev_clk;

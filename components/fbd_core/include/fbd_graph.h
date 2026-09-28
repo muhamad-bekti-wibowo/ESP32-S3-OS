@@ -36,6 +36,7 @@ typedef enum {
     FBD_NODE_TON,
     FBD_NODE_TOF,
     FBD_NODE_TP,
+    FBD_NODE_OSC,
     FBD_NODE_CTU,
     FBD_NODE_DIGITAL_IN,
     FBD_NODE_DIGITAL_OUT,
@@ -90,6 +91,7 @@ typedef struct {
     float in_min, in_max, out_min, out_max; /* FBD_NODE_SCALE */
     float clamp_min, clamp_max;       /* FBD_NODE_CLAMP */
     uint32_t delay_ms;                 /* FBD_NODE_TON/TOF/TP */
+    uint32_t osc_on_ms, osc_off_ms;    /* FBD_NODE_OSC: durasi fase ON/OFF */
     int32_t preset;                    /* FBD_NODE_CTU */
     int pin;                            /* FBD_NODE_DIGITAL_IN/OUT/ANALOG_IN/PWM_OUT/SERVO */
     bool invert;                        /* FBD_NODE_DIGITAL_IN/OUT */

@@ -127,6 +127,14 @@ const NODE_TYPES = {
         help: 'Counter naik: port clk bertambah 1 tiap transisi false->true, port reset mengembalikan ke 0. Output true kalau hitungan >= Preset.',
         fields: [{ key: 'preset', label: 'Preset', type: 'number', default: 3 }],
     },
+    osc: {
+        label: 'Osilator', inputs: 0, outputs: 1, category: 'timing', icon: 'osc',
+        help: 'Clock generator: output bergantian ON/OFF terus-menerus tanpa input - ON selama On (ms), lalu OFF selama Off (ms), berulang. Isi keduanya sama untuk blink simetris (mis. LED berkedip rata), atau beda untuk pola asimetris (mis. kedip cepat: On 200ms, Off 800ms).',
+        fields: [
+            { key: 'on_ms', label: 'On (ms)', type: 'number', default: 500 },
+            { key: 'off_ms', label: 'Off (ms)', type: 'number', default: 500 },
+        ],
+    },
 
     // ---- I/O digital (Level 1) ----
     digital_input: {

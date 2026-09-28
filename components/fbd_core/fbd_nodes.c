@@ -189,6 +189,25 @@ fbd_value_t fbd_eval_tp(fbd_value_t input, uint32_t pulse_ms, uint32_t now_ms, f
     return fbd_make_bool(state->running);
 }
 
+fbd_value_t fbd_eval_osc(uint32_t on_ms, uint32_t off_ms, uint32_t now_ms, fbd_timer_state_t *state)
+{
+    /* state->running dipakai sebagai fase sekarang (true=ON, false=OFF),
+     * bukan "sedang menghitung" seperti TON/TOF/TP - reinterpretasi field
+     * yang sama, valid karena struct fbd_timer_state_t generik/tanpa
+     * makna semantik tetap per field. prev_input tidak dipakai osilator
+     * (tidak ada input eksternal untuk dibandingkan). */
+    uint32_t phase_duration = state->running ? on_ms : off_ms;
+    /* Durasi fase 0 (mis. off_ms=0) berarti fase itu instan, langsung
+     * toggle di cycle berikutnya - hindari now_ms - start_ms >= 0 selalu
+     * true tanpa pernah maju kalau phase_duration juga 0 utk kedua fase
+     * (osilator "off" total, cukup wajar - bukan kasus istimewa). */
+    if (now_ms - state->start_ms >= phase_duration) {
+        state->running = !state->running;
+        state->start_ms = now_ms;
+    }
+    return fbd_make_bool(state->running);
+}
+
 fbd_value_t fbd_eval_ctu(fbd_value_t clk, fbd_value_t reset, int32_t preset_value, fbd_counter_state_t *state)
 {
     if (fbd_to_bool(reset)) {
