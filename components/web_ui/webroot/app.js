@@ -93,11 +93,22 @@ function buildPalette() {
             btn.type = 'button';
             btn.className = 'palette-item';
             btn.dataset.label = def.label.toLowerCase();
+            btn.dataset.nodeType = type;
+            btn.draggable = true;
             btn.innerHTML = `${svgIcon(def.icon, 'palette-item-icon')}<span>${def.label}</span>`;
+            /* Klik biasa (tanpa drag) tetap jalan seperti sebelumnya - node
+             * ditambah di posisi default dekat pojok kiri-atas canvas.
+             * Drag-and-drop (lihat wirePaletteDragDrop()) menambahkan di
+             * posisi persis tempat dilepas, tidak saling mengganggu karena
+             * browser tidak memicu "click" kalau drag benar-benar terjadi. */
             btn.onclick = () => {
                 const rect = editor.precanvas.getBoundingClientRect();
                 addNodeToCanvas(type, 100 - rect.x / editor.zoom, 100 - rect.y / editor.zoom);
             };
+            btn.addEventListener('dragstart', (e) => {
+                e.dataTransfer.setData('text/plain', type);
+                e.dataTransfer.effectAllowed = 'copy';
+            });
             body.appendChild(btn);
         });
         section.appendChild(body);
@@ -308,12 +319,35 @@ function disableDrawflowContextMenu(container) {
     }, true);
 }
 
+/* Drag node dari palette (lihat dragstart di buildPalette()) ke posisi
+ * manapun di canvas - dilepas persis di titik itu, bukan posisi default
+ * tetap seperti klik biasa. Konversi koordinat mouse (viewport) -> posisi
+ * canvas (precanvas, dipengaruhi pan/zoom) memakai rumus yang sama
+ * dengan addNodeToCanvas() saat klik, hanya titik acuannya beda
+ * (e.clientX/Y dari drop, bukan konstanta 100,100). */
+function wirePaletteDragDrop(container) {
+    container.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+    });
+    container.addEventListener('drop', (e) => {
+        e.preventDefault();
+        const type = e.dataTransfer.getData('text/plain');
+        if (!type || !NODE_TYPES[type]) return;
+        const rect = editor.precanvas.getBoundingClientRect();
+        const x = (e.clientX - rect.x) / editor.zoom;
+        const y = (e.clientY - rect.y) / editor.zoom;
+        addNodeToCanvas(type, x, y);
+    });
+}
+
 function initEditor() {
     const container = document.getElementById('drawflow');
     editor = new Drawflow(container);
     editor.reroute = true;
     editor.start();
     disableDrawflowContextMenu(container);
+    wirePaletteDragDrop(container);
 
     editor.on('nodeSelected', (dfId) => selectNode(dfId));
     editor.on('nodeUnselected', () => selectNode(null));

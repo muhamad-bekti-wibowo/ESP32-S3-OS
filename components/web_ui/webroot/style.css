@@ -125,7 +125,7 @@ h3 {
     width: 100%;
     margin-bottom: 6px;
     padding: 9px 12px;
-    cursor: pointer;
+    cursor: grab;
     font-size: 13px;
     font-weight: 600;
     font-family: inherit;
@@ -135,6 +135,10 @@ h3 {
     border-radius: var(--radius-sm);
     text-align: left;
     transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.palette-item:active {
+    cursor: grabbing;
 }
 
 .palette-item-icon {
