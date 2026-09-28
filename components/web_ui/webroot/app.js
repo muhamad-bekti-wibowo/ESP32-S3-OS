@@ -43,14 +43,37 @@ function defaultParams(type) {
     return params;
 }
 
+/* Tooltip (atribut title) di tiap lingkaran port - muncul saat hover
+ * mouse, menjelaskan port itu untuk apa. Dipanggil setelah node dibuat
+ * (addNodeToCanvas ATAU schemaToDrawflow via editor.import()), karena
+ * elemen .input_N/.output_N baru ada di DOM setelah Drawflow selesai
+ * merender node itu. Fallback ke label generik "in0"/"out0" kalau
+ * INPUT_PORT_LABELS/OUTPUT_PORT_LABELS tidak punya entry utk type ini. */
+function wirePortTooltips(dfId, type) {
+    const nodeEl = document.getElementById(`node-${dfId}`);
+    if (!nodeEl) return;
+    const def = NODE_TYPES[type];
+    const inLabels = INPUT_PORT_LABELS[type];
+    const outLabels = OUTPUT_PORT_LABELS[type];
+    for (let i = 0; i < def.inputs; i++) {
+        const portEl = nodeEl.querySelector(`.input_${i + 1}`);
+        if (portEl) portEl.title = (inLabels && inLabels[i]) || `in${i}`;
+    }
+    for (let i = 0; i < def.outputs; i++) {
+        const portEl = nodeEl.querySelector(`.output_${i + 1}`);
+        if (portEl) portEl.title = (outLabels && outLabels[i]) || `out${i}`;
+    }
+}
+
 function addNodeToCanvas(type, x, y) {
     const def = NODE_TYPES[type];
     const params = defaultParams(type);
     const html = buildNodeHtml(type);
-    editor.addNode(
+    const dfId = editor.addNode(
         type, def.inputs, def.outputs, x, y,
         'fbd-node', { fbdType: type, params }, html
     );
+    wirePortTooltips(dfId, type);
 }
 
 /* Palette dikelompokkan per category (lihat CATEGORY_LABELS di
@@ -588,6 +611,9 @@ async function loadProgram() {
         const drawflowData = schemaToDrawflow(schema);
         editor.clear();
         editor.import(drawflowData);
+        Object.entries(drawflowData.drawflow.Home.data).forEach(([dfId, dfNode]) => {
+            wirePortTooltips(dfId, dfNode.data.fbdType);
+        });
         selectNode(null);
         setStatus('Load sukses');
     } catch (err) {

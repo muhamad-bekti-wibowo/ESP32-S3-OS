@@ -252,10 +252,36 @@ const NODE_TYPES = {
     },
 };
 
-/* Label port input per tipe, khusus yang bukan generik "in0/in1". Dipakai
- * di app.js untuk render label port yang lebih jelas di canvas. */
+/* Label port input/output per tipe, dipakai sebagai tooltip (atribut
+ * title) di tiap lingkaran port pada node - muncul saat hover mouse,
+ * menjelaskan port itu untuk apa tanpa perlu buka panel Properties.
+ * Tipe yang tidak terdaftar di sini pakai fallback generik "in0"/"in1"/
+ * "out0" (lihat app.js wirePortTooltips()). */
 const INPUT_PORT_LABELS = {
-    ctu: ['clk', 'reset'],
+    and: ['in0', 'in1'],
+    or: ['in0', 'in1'],
+    not: ['in'],
+    xor: ['in0', 'in1'],
+    nand: ['in0', 'in1'],
+    nor: ['in0', 'in1'],
+    compare: ['in0', 'in1'],
     var_set: ['in'],
-    ws2812: ['R', 'G', 'B'],
+    math: ['in0', 'in1'],
+    min: ['in0', 'in1'],
+    max: ['in0', 'in1'],
+    abs: ['in'],
+    scale: ['in'],
+    clamp: ['in'],
+    ton: ['in'],
+    tof: ['in'],
+    tp: ['in'],
+    ctu: ['clk', 'reset'],
+    digital_output: ['in'],
+    pwm_output: ['duty % (0-100)'],
+    servo: ['sudut (0-180 derajat)'],
+    ws2812: ['R (0-255)', 'G (0-255)', 'B (0-255)'],
+};
+
+const OUTPUT_PORT_LABELS = {
+    i2c_read_reg: ['raw_bytes', 'error'],
 };
