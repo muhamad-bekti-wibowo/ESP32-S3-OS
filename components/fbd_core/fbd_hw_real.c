@@ -5,6 +5,8 @@
 #include "fbd_graph.h"
 #include "driver/gpio.h"
 #include "driver/ledc.h"
+#include "driver/rmt_tx.h"
+#include "driver/rmt_encoder.h"
 #include "esp_adc/adc_oneshot.h"
 #include "esp_log.h"
 #include <string.h>
@@ -234,6 +236,113 @@ static void real_servo_write(int pin, float angle_deg, uint32_t min_us, uint32_t
     real_pwm_write(pin, duty);
 }
 
+/* ---- LED RGB addressable (WS2812/NeoPixel, protokol RMT 1-wire) ----
+ * Timing WS2812 standar (800kHz): bit1 = 0.8us HIGH + 0.45us LOW,
+ * bit0 = 0.4us HIGH + 0.85us LOW, reset/latch >= 50us LOW di akhir frame.
+ * RMT resolution 10MHz (100ns/tick) supaya timing di atas bisa dibulatkan
+ * ke tick bulat tanpa drift signifikan. Urutan byte per LED: G,R,B (bukan
+ * R,G,B - WS2812 hampir semua varian mengirim GRB, dikonversi di
+ * real_ws2812_write() supaya API backend tetap r,g,b intuitif). */
+#define FBD_HW_MAX_WS2812_PINS 4
+#define FBD_HW_WS2812_MAX_LEDS 256 /* batas statis - cukup untuk strip indikator, bukan instalasi besar */
+
+static struct {
+    int pin;
+    rmt_channel_handle_t channel;
+    rmt_encoder_handle_t encoder;
+    bool inited;
+} s_ws2812_pins[FBD_HW_MAX_WS2812_PINS];
+static int s_ws2812_pin_count = 0;
+
+static int find_ws2812_slot(int pin)
+{
+    for (int i = 0; i < s_ws2812_pin_count; ++i) {
+        if (s_ws2812_pins[i].pin == pin) return i;
+    }
+    return -1;
+}
+
+static void real_ws2812_init(int pin, int count)
+{
+    (void)count;
+    if (find_ws2812_slot(pin) >= 0 || s_ws2812_pin_count >= FBD_HW_MAX_WS2812_PINS) {
+        return; /* sudah pernah di-init, atau slot penuh */
+    }
+
+    rmt_tx_channel_config_t tx_cfg = {
+        .gpio_num = pin,
+        .clk_src = RMT_CLK_SRC_DEFAULT,
+        .resolution_hz = 10 * 1000 * 1000, /* 10MHz -> 1 tick = 100ns */
+        .mem_block_symbols = 64,
+        .trans_queue_depth = 4,
+    };
+    rmt_channel_handle_t channel;
+    if (rmt_new_tx_channel(&tx_cfg, &channel) != ESP_OK) {
+        ESP_LOGE(TAG, "ws2812_init: gagal buat RMT TX channel di GPIO%d", pin);
+        return;
+    }
+    if (rmt_enable(channel) != ESP_OK) {
+        ESP_LOGE(TAG, "ws2812_init: gagal enable RMT channel GPIO%d", pin);
+        return;
+    }
+
+    /* bit1: HIGH 0.8us (8 tick @10MHz) + LOW 0.45us (4-5 tick, dibulatkan 4).
+     * bit0: HIGH 0.4us (4 tick) + LOW 0.85us (8-9 tick, dibulatkan 9). */
+    rmt_bytes_encoder_config_t bytes_cfg = {
+        .bit0 = { .level0 = 1, .duration0 = 4, .level1 = 0, .duration1 = 9 },
+        .bit1 = { .level0 = 1, .duration0 = 8, .level1 = 0, .duration1 = 4 },
+        .flags.msb_first = 1,
+    };
+    rmt_encoder_handle_t encoder;
+    if (rmt_new_bytes_encoder(&bytes_cfg, &encoder) != ESP_OK) {
+        ESP_LOGE(TAG, "ws2812_init: gagal buat bytes encoder GPIO%d", pin);
+        return;
+    }
+
+    s_ws2812_pins[s_ws2812_pin_count].pin = pin;
+    s_ws2812_pins[s_ws2812_pin_count].channel = channel;
+    s_ws2812_pins[s_ws2812_pin_count].encoder = encoder;
+    s_ws2812_pins[s_ws2812_pin_count].inited = true;
+    s_ws2812_pin_count++;
+}
+
+static void real_ws2812_write(int pin, int count, uint8_t r, uint8_t g, uint8_t b)
+{
+    int slot = find_ws2812_slot(pin);
+    if (slot < 0) {
+        real_ws2812_init(pin, count);
+        slot = find_ws2812_slot(pin);
+        if (slot < 0) return; /* init gagal (mis. slot penuh) */
+    }
+    if (count < 1) count = 1;
+    if (count > FBD_HW_WS2812_MAX_LEDS) count = FBD_HW_WS2812_MAX_LEDS;
+
+    /* Buffer GRB per LED - dialokasikan di stack, aman karena dibatasi
+     * FBD_HW_WS2812_MAX_LEDS (256*3 = 768 byte, jauh di bawah stack
+     * fbd_scan_task 4096 byte, TIDAK sebesar fbd_graph_t 19KB yang
+     * memang wajib scratch buffer statis). Semua LED warna sama sesuai
+     * desain node (bukan per-LED individual). */
+    uint8_t buf[FBD_HW_WS2812_MAX_LEDS * 3];
+    for (int i = 0; i < count; ++i) {
+        buf[i * 3 + 0] = g;
+        buf[i * 3 + 1] = r;
+        buf[i * 3 + 2] = b;
+    }
+
+    rmt_transmit_config_t tx_cfg = { .loop_count = 0 };
+    esp_err_t err = rmt_transmit(s_ws2812_pins[slot].channel, s_ws2812_pins[slot].encoder,
+                                  buf, (size_t)count * 3, &tx_cfg);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "ws2812_write: rmt_transmit gagal GPIO%d: %d", pin, err);
+        return;
+    }
+    /* Tunggu transmit selesai sebelum return - scan cycle 20ms jauh lebih
+     * lama dari waktu kirim WS2812 (mis. 30 LED ~= 30*24 bit*1.25us =
+     * ~900us), aman blocking singkat di sini tanpa mengganggu timing
+     * scan cycle secara signifikan. */
+    rmt_tx_wait_all_done(s_ws2812_pins[slot].channel, 100);
+}
+
 static const fbd_hw_backend_t s_real_backend = {
     .digital_init_input = real_digital_init_input,
     .digital_init_output = real_digital_init_output,
@@ -245,6 +354,8 @@ static const fbd_hw_backend_t s_real_backend = {
     .pwm_write = real_pwm_write,
     .servo_init = real_servo_init,
     .servo_write = real_servo_write,
+    .ws2812_init = real_ws2812_init,
+    .ws2812_write = real_ws2812_write,
 };
 
 const fbd_hw_backend_t *fbd_hw_real_backend(void)

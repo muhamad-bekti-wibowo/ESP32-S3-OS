@@ -38,6 +38,13 @@ typedef struct {
     /* --- Servo (LEDC + konversi angle->pulse width) --- */
     void (*servo_init)(int pin, uint32_t min_us, uint32_t max_us);
     void (*servo_write)(int pin, float angle_deg, uint32_t min_us, uint32_t max_us);
+
+    /* --- LED RGB addressable (WS2812/NeoPixel, protokol 1-wire RMT) ---
+     * count = jumlah LED di strip - SEMUA LED diset warna yang sama (bukan
+     * per-LED individual, di luar scope: FBD single-value port tidak
+     * cocok untuk array warna per-LED). r/g/b masing-masing 0-255. */
+    void (*ws2812_init)(int pin, int count);
+    void (*ws2812_write)(int pin, int count, uint8_t r, uint8_t g, uint8_t b);
 } fbd_hw_backend_t;
 
 /* Backend simulated: tidak menyentuh register apa pun, dipakai default

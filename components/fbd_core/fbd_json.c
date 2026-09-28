@@ -74,6 +74,7 @@ static const char *node_type_to_str(fbd_node_type_t type)
         case FBD_NODE_ANALOG_IN:    return "analog_input";
         case FBD_NODE_PWM_OUT:      return "pwm_output";
         case FBD_NODE_SERVO:        return "servo";
+        case FBD_NODE_WS2812:       return "ws2812";
         case FBD_NODE_I2C_READ_REG:  return "i2c_read_reg";
         case FBD_NODE_I2C_WRITE_REG: return "i2c_write_reg";
         case FBD_NODE_I2C_WRITE_BURST: return "i2c_write_burst";
@@ -388,6 +389,25 @@ static bool parse_params(const cJSON *params, fbd_node_t *node, char *err, size_
                 !is_pin_safe_for_real_gpio(node->params.pin, err, err_len)) return false;
             break;
         }
+        case FBD_NODE_WS2812: {
+            const cJSON *pin = cJSON_GetObjectItem(params, "pin");
+            const cJSON *count = cJSON_GetObjectItem(params, "count");
+            if (!pin || !count) {
+                set_err(err, err_len, "ws2812: params.pin/count wajib");
+                return false;
+            }
+            int count_val = (int)cJSON_GetNumberValue(count);
+            if (count_val < 1 || count_val > 256) {
+                set_err(err, err_len, "ws2812: params.count harus 1-256");
+                return false;
+            }
+            node->params.pin = (int)cJSON_GetNumberValue(pin);
+            node->params.ws2812_count = count_val;
+            if (!parse_hw_mode(params, &node->params.hw_mode, err, err_len)) return false;
+            if (node->params.hw_mode == FBD_HW_REAL &&
+                !is_pin_safe_for_real_gpio(node->params.pin, err, err_len)) return false;
+            break;
+        }
         case FBD_NODE_I2C_READ_REG: {
             const cJSON *bus = cJSON_GetObjectItem(params, "bus");
             const cJSON *address = cJSON_GetObjectItem(params, "address");
@@ -697,6 +717,11 @@ static cJSON *serialize_params(const fbd_node_t *node)
             cJSON_AddNumberToObject(params, "pin", node->params.pin);
             cJSON_AddNumberToObject(params, "min_us", node->params.min_us);
             cJSON_AddNumberToObject(params, "max_us", node->params.max_us);
+            cJSON_AddStringToObject(params, "hw_mode", hw_mode_to_str(node->params.hw_mode));
+            break;
+        case FBD_NODE_WS2812:
+            cJSON_AddNumberToObject(params, "pin", node->params.pin);
+            cJSON_AddNumberToObject(params, "count", node->params.ws2812_count);
             cJSON_AddStringToObject(params, "hw_mode", hw_mode_to_str(node->params.hw_mode));
             break;
         case FBD_NODE_I2C_READ_REG:

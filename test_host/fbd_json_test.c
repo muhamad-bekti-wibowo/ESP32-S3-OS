@@ -142,6 +142,57 @@ static void test_level1_analog_pwm_servo_roundtrip(void)
     cJSON_Delete(root2);
 }
 
+static void test_ws2812_roundtrip(void)
+{
+    const char *json =
+    "{ \"version\": 1, \"nodes\": ["
+    "  { \"id\": \"led1\", \"type\": \"ws2812\", \"params\": { \"pin\": 8, \"count\": 30, \"hw_mode\": \"real\" } }"
+    "], \"links\": [] }";
+
+    cJSON *root = cJSON_Parse(json);
+    fbd_graph_t g;
+    char err[FBD_JSON_ERR_LEN] = {0};
+    bool ok = fbd_json_parse(root, &g, err, sizeof(err));
+    CHECK(ok, "ws2812 berhasil di-parse");
+    if (!ok) printf("  error: %s\n", err);
+    cJSON_Delete(root);
+
+    size_t idx = fbd_graph_find_node(&g, "led1");
+    CHECK(g.nodes[idx].type == FBD_NODE_WS2812, "led1 bertipe FBD_NODE_WS2812");
+    CHECK(g.nodes[idx].params.pin == 8, "led1 params.pin = 8");
+    CHECK(g.nodes[idx].params.ws2812_count == 30, "led1 params.count = 30");
+    CHECK(g.nodes[idx].params.hw_mode == FBD_HW_REAL, "led1 params.hw_mode = real");
+
+    cJSON *serialized = fbd_json_serialize(&g);
+    char *serialized_str = cJSON_PrintUnformatted(serialized);
+
+    cJSON *root2 = cJSON_Parse(serialized_str);
+    fbd_graph_t g2;
+    bool ok2 = fbd_json_parse(root2, &g2, err, sizeof(err));
+    CHECK(ok2, "hasil serialize ws2812 bisa di-parse ulang (round-trip)");
+
+    size_t idx2 = fbd_graph_find_node(&g2, "led1");
+    CHECK(g2.nodes[idx2].params.ws2812_count == 30, "round-trip: led1 count tetap 30");
+
+    free(serialized_str);
+    cJSON_Delete(serialized);
+    cJSON_Delete(root2);
+}
+
+static void test_ws2812_count_out_of_range_rejected(void)
+{
+    const char *json =
+    "{ \"version\": 1, \"nodes\": ["
+    "  { \"id\": \"led1\", \"type\": \"ws2812\", \"params\": { \"pin\": 8, \"count\": 0 } }"
+    "], \"links\": [] }";
+    cJSON *root = cJSON_Parse(json);
+    fbd_graph_t g;
+    char err[FBD_JSON_ERR_LEN] = {0};
+    bool ok = fbd_json_parse(root, &g, err, sizeof(err));
+    CHECK(ok == false, "ws2812: params.count=0 ditolak (di luar rentang 1-256)");
+    cJSON_Delete(root);
+}
+
 static void test_osc_roundtrip(void)
 {
     const char *json =
@@ -355,6 +406,8 @@ int main(void)
     test_roundtrip();
     test_level1_analog_pwm_servo_roundtrip();
     test_osc_roundtrip();
+    test_ws2812_roundtrip();
+    test_ws2812_count_out_of_range_rejected();
     test_hw_mode_default_simulated_when_omitted();
     test_i2c_and_sys_var_roundtrip();
     test_reject_unsafe_pin_when_real();

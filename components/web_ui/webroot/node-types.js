@@ -24,6 +24,7 @@ const CATEGORY_LABELS = {
     timing: 'Timing',
     io_digital: 'I/O Digital',
     io_analog: 'I/O Analog & PWM',
+    io_led: 'LED RGB',
     i2c: 'I2C',
     system: 'System',
 };
@@ -196,6 +197,18 @@ const NODE_TYPES = {
         ],
     },
 
+    // ---- LED RGB addressable (WS2812/NeoPixel, protokol 1-wire RMT) ----
+    ws2812: {
+        label: 'WS2812 RGB', inputs: 3, outputs: 1, category: 'io_led', icon: 'rgb',
+        help: 'LED RGB addressable (WS2812/NeoPixel) lewat 1 pin data. Input R/G/B masing-masing 0-255 (di-clamp otomatis kalau di luar rentang). Count = jumlah LED di strip - SEMUA LED diset warna yang sama (bukan per-LED individual).',
+        fields: [
+            { key: 'pin', label: 'Pin', type: 'number', default: 8 },
+            { key: 'count', label: 'Jumlah LED', type: 'number', default: 1 },
+            { key: 'hw_mode', label: 'HW Mode', type: 'select',
+              options: ['simulated', 'real'], default: 'simulated' },
+        ],
+    },
+
     // ---- I2C primitive (Level 2, register-level, BUKAN driver sensor) ----
     i2c_read_reg: {
         label: 'I2C Read Reg', inputs: 0, outputs: 2, category: 'i2c', icon: 'i2c',
@@ -244,4 +257,5 @@ const NODE_TYPES = {
 const INPUT_PORT_LABELS = {
     ctu: ['clk', 'reset'],
     var_set: ['in'],
+    ws2812: ['R', 'G', 'B'],
 };

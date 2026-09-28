@@ -122,10 +122,49 @@ static void test_pwm_and_servo_simulated(void)
           "servo: sudut di luar rentang di-clamp ke 180 (maks)");
 }
 
+/* ws2812 mode simulated: tidak menyentuh RMT, outputs[0] pass-through
+ * channel R untuk indikator UI. Clamp rentang 0-255 juga dites di sini
+ * (nilai luar rentang, mis. hasil scale, tidak boleh wrap-around). */
+static void test_ws2812_simulated(void)
+{
+    fbd_graph_t g;
+    fbd_graph_init(&g);
+
+    fbd_node_t *led = fbd_graph_add_node(&g, "led1", FBD_NODE_WS2812);
+    led->params.hw_mode = FBD_HW_SIMULATED;
+    led->params.pin = 8;
+    led->params.ws2812_count = 10;
+
+    fbd_node_t *r = fbd_graph_add_node(&g, "r1", FBD_NODE_CONST);
+    r->params.const_value = fbd_make_float(255.0f);
+    fbd_node_t *gr = fbd_graph_add_node(&g, "g1", FBD_NODE_CONST);
+    gr->params.const_value = fbd_make_float(128.0f);
+    fbd_node_t *b = fbd_graph_add_node(&g, "b1", FBD_NODE_CONST);
+    b->params.const_value = fbd_make_float(64.0f);
+
+    fbd_graph_add_link(&g, "r1", 0, "led1", 0);
+    fbd_graph_add_link(&g, "g1", 0, "led1", 1);
+    fbd_graph_add_link(&g, "b1", 0, "led1", 2);
+
+    CHECK(fbd_graph_compile(&g), "compile() sukses untuk rangkaian ws2812 simulated (3 input R/G/B)");
+
+    fbd_graph_execute_cycle(&g, 0);
+
+    size_t idx = fbd_graph_find_node(&g, "led1");
+    CHECK(g.nodes[idx].outputs[0].i == 255, "ws2812 simulated: outputs[0] pass-through R=255");
+
+    /* Clamp: input di luar rentang 0-255 tidak boleh wrap-around/overflow. */
+    r->params.const_value = fbd_make_float(999.0f);
+    b->params.const_value = fbd_make_float(-50.0f);
+    fbd_graph_execute_cycle(&g, 20);
+    CHECK(g.nodes[idx].outputs[0].i == 255, "ws2812: R di luar rentang (999) di-clamp ke 255");
+}
+
 int main(void)
 {
     test_analog_scale_compare_digital_out();
     test_pwm_and_servo_simulated();
+    test_ws2812_simulated();
 
     printf("\n%s (%d gagal)\n", g_fail == 0 ? "SEMUA TEST LOLOS" : "ADA TEST GAGAL", g_fail);
     return g_fail == 0 ? 0 : 1;

@@ -217,6 +217,33 @@ static fbd_value_t evaluate_node(fbd_node_t *node, fbd_var_store_t *vars, uint32
             }
             return fbd_make_float(angle);
         }
+        case FBD_NODE_WS2812: {
+            /* Input R,G,B (0-255) - di-clamp supaya nilai di luar rentang
+             * (mis. hasil scale/math) tidak wrap-around jadi warna acak. */
+            int r = (int)fbd_to_float(in[0]);
+            int g = (int)fbd_to_float(in[1]);
+            int b = (int)fbd_to_float(in[2]);
+            if (r < 0) r = 0;
+            if (r > 255) r = 255;
+            if (g < 0) g = 0;
+            if (g > 255) g = 255;
+            if (b < 0) b = 0;
+            if (b > 255) b = 255;
+            if (node->params.hw_mode == FBD_HW_REAL) {
+                const fbd_hw_backend_t *hw = fbd_hw_get_backend();
+                if (!node->state.hw_initialized) {
+                    hw->ws2812_init(node->params.pin, node->params.ws2812_count);
+                    node->state.hw_initialized = true;
+                }
+                hw->ws2812_write(node->params.pin, node->params.ws2812_count,
+                                  (uint8_t)r, (uint8_t)g, (uint8_t)b);
+            }
+            /* outputs[0] pass-through r (indikator UI paling representatif
+             * dari 3 channel - outputs[] cuma 2 slot, tidak cukup utk r,g,b
+             * sekaligus; live monitor GET /api/program tetap bisa lihat
+             * inputs[] lengkap kalau perlu r/g/b masing-masing). */
+            return fbd_make_int(r);
+        }
         case FBD_NODE_I2C_READ_REG: {
             uint8_t buf[I2C_BRIDGE_MAX_DATA_LEN];
             uint8_t len = node->params.i2c_data_len;

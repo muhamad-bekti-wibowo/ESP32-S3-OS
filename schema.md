@@ -209,6 +209,31 @@ skala logic yang sama setelah `hw_mode` diganti `"real"` — nilai presisi
 boleh beda (ADC nyata punya noise, potensiometer fisik bukan angka bulat),
 tapi arah naik/turun dan threshold logic harus konsisten.
 
+### LED RGB addressable (Level 1, WS2812/NeoPixel)
+
+Protokol 1-wire (bukan I2C, bukan PWM biasa) — dikendalikan lewat ESP-IDF
+`driver/rmt_tx` dengan bytes encoder timing WS2812 standar (800kHz: bit1 =
+0.8µs HIGH + 0.45µs LOW, bit0 = 0.4µs HIGH + 0.85µs LOW). Urutan byte fisik
+yang dikirim ke LED adalah GRB (bukan RGB) sesuai kebanyakan chip WS2812 —
+konversi ini dilakukan di firmware, params/input tetap R/G/B intuitif.
+
+| `type` | `params` | Keterangan |
+|---|---|---|
+| `ws2812` | `{ "pin": 8, "count": 30, "hw_mode": "simulated" }` | 3 input: R, G, B (0-255, di-clamp otomatis). `count`: jumlah LED di strip (1-256) — **semua LED diset warna yang sama** (bukan per-LED individual, di luar scope Level 1). |
+
+Contoh — strip 30 LED warna ungu tetap:
+```json
+{ "id": "r1", "type": "const", "params": { "datatype": "int32", "value": 128 } }
+{ "id": "g1", "type": "const", "params": { "datatype": "int32", "value": 0 } }
+{ "id": "b1", "type": "const", "params": { "datatype": "int32", "value": 255 } }
+{ "id": "led1", "type": "ws2812", "params": { "pin": 8, "count": 30, "hw_mode": "real" } }
+```
+(link: `r1→led1.in0`, `g1→led1.in1`, `b1→led1.in2`)
+
+Sama seperti `analog_input`/`pwm_output`/`servo`, kriteria konsistensi
+mode berlaku: desain dulu di `hw_mode: "simulated"`, baru pindah ke
+`"real"` setelah yakin logikanya benar.
+
 ### I2C primitive register-level (Level 2)
 
 **HANYA primitive generik, BUKAN driver sensor spesifik** (plan.md prinsip

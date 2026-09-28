@@ -59,6 +59,16 @@ static void sim_servo_write(int pin, float angle_deg, uint32_t min_us, uint32_t 
     (void)pin; (void)angle_deg; (void)min_us; (void)max_us;
 }
 
+static void sim_ws2812_init(int pin, int count)
+{
+    (void)pin; (void)count;
+}
+
+static void sim_ws2812_write(int pin, int count, uint8_t r, uint8_t g, uint8_t b)
+{
+    (void)pin; (void)count; (void)r; (void)g; (void)b;
+}
+
 static const fbd_hw_backend_t s_sim_backend = {
     .digital_init_input = sim_digital_init_input,
     .digital_init_output = sim_digital_init_output,
@@ -70,6 +80,8 @@ static const fbd_hw_backend_t s_sim_backend = {
     .pwm_write = sim_pwm_write,
     .servo_init = sim_servo_init,
     .servo_write = sim_servo_write,
+    .ws2812_init = sim_ws2812_init,
+    .ws2812_write = sim_ws2812_write,
 };
 
 const fbd_hw_backend_t *fbd_hw_sim_backend(void)
