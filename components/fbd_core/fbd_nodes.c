@@ -209,12 +209,19 @@ fbd_value_t fbd_eval_osc(uint32_t on_ms, uint32_t off_ms, uint32_t now_ms, fbd_t
 }
 
 fbd_value_t fbd_eval_ctud(fbd_value_t up, fbd_value_t down, fbd_value_t reset,
-                           int32_t reset_value, int32_t preset_value, fbd_counter_state_t *state)
+                           int32_t reset_value, int32_t preset_value, bool auto_reset,
+                           fbd_counter_state_t *state)
 {
     bool up_now = fbd_to_bool(up);
     bool down_now = fbd_to_bool(down);
 
-    if (fbd_to_bool(reset)) {
+    /* Mode manual (auto_reset=false): port reset harus di-trigger
+     * eksplisit - selama true, count dipaksa ke reset_value, up/down
+     * diabaikan cycle itu. Mode auto (auto_reset=true): port reset SAMA
+     * SEKALI DIABAIKAN - reset terjadi sendiri begitu count>=preset,
+     * dites SETELAH up/down diproses di cycle yang sama (count tidak
+     * pernah "terlihat" melebihi preset walau cuma sesaat). */
+    if (!auto_reset && fbd_to_bool(reset)) {
         state->count = reset_value;
         state->prev_up = up_now;
         state->prev_down = down_now;
@@ -233,33 +240,9 @@ fbd_value_t fbd_eval_ctud(fbd_value_t up, fbd_value_t down, fbd_value_t reset,
     }
     state->prev_up = up_now;
     state->prev_down = down_now;
-    return fbd_make_bool(state->count >= preset_value);
-}
 
-fbd_value_t fbd_eval_ctl(fbd_value_t up, fbd_value_t down,
-                          int32_t reset_value, int32_t preset_value, fbd_counter_state_t *state)
-{
-    bool up_now = fbd_to_bool(up);
-    bool down_now = fbd_to_bool(down);
-
-    if (up_now && !state->prev_up) {
-        state->count++;
-    }
-    if (down_now && !state->prev_down) {
-        state->count--;
-    }
-    state->prev_up = up_now;
-    state->prev_down = down_now;
-
-    /* Auto-reset: dites SETELAH up/down diproses di cycle yang sama,
-     * supaya count tidak pernah "terlihat" melebihi preset_value walau
-     * cuma sesaat - begitu tercapai, langsung dikembalikan sebelum
-     * output dibaca. */
-    if (state->count >= preset_value) {
+    if (auto_reset && state->count >= preset_value) {
         state->count = reset_value;
     }
-    return fbd_make_bool(false); /* lihat komentar di fbd_graph.c: outputs[0]
-                                   * CTL selalu false (bukan threshold) - nilai
-                                   * berguna satu-satunya adalah count itu
-                                   * sendiri di outputs[1]. */
+    return fbd_make_bool(state->count >= preset_value);
 }

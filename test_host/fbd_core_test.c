@@ -168,7 +168,7 @@ static void test_timer_osc(void)
     CHECK(fbd_to_bool(out) == false, "OSC simetris: t=1000 -> toggle balik OFF");
 }
 
-static void test_counter_ctud(void)
+static void test_counter_ctud_manual_reset(void)
 {
     fbd_counter_state_t st = {0};
     fbd_value_t no_reset = fbd_make_bool(false);
@@ -176,70 +176,78 @@ static void test_counter_ctud(void)
     fbd_value_t on = fbd_make_bool(true);
     fbd_value_t out;
 
-    /* Naik 3x sampai preset (mirip perilaku CTU lama). */
-    out = fbd_eval_ctud(on, off, no_reset, 0, 3, &st);
-    CHECK(fbd_to_bool(out) == false, "CTUD: count=1 < preset 3 -> false");
-    fbd_eval_ctud(off, off, no_reset, 0, 3, &st); /* tepi turun di up, tidak nambah */
-    out = fbd_eval_ctud(on, off, no_reset, 0, 3, &st);
-    CHECK(fbd_to_bool(out) == false, "CTUD: count=2 < preset 3 -> false");
-    fbd_eval_ctud(off, off, no_reset, 0, 3, &st);
-    out = fbd_eval_ctud(on, off, no_reset, 0, 3, &st);
-    CHECK(fbd_to_bool(out) == true, "CTUD: count=3 >= preset 3 -> true");
+    /* Mode manual (auto_reset=false) - perilaku sama seperti sebelum
+     * digabung jadi 1 node: port reset harus di-trigger eksplisit. */
+    out = fbd_eval_ctud(on, off, no_reset, 0, 3, false, &st);
+    CHECK(fbd_to_bool(out) == false, "CTUD manual: count=1 < preset 3 -> false");
+    fbd_eval_ctud(off, off, no_reset, 0, 3, false, &st); /* tepi turun di up, tidak nambah */
+    out = fbd_eval_ctud(on, off, no_reset, 0, 3, false, &st);
+    CHECK(fbd_to_bool(out) == false, "CTUD manual: count=2 < preset 3 -> false");
+    fbd_eval_ctud(off, off, no_reset, 0, 3, false, &st);
+    out = fbd_eval_ctud(on, off, no_reset, 0, 3, false, &st);
+    CHECK(fbd_to_bool(out) == true, "CTUD manual: count=3 >= preset 3 -> true");
 
     /* Turun 1x lewat port down. */
-    fbd_eval_ctud(off, off, no_reset, 0, 3, &st);
-    out = fbd_eval_ctud(off, on, no_reset, 0, 3, &st);
-    CHECK(fbd_to_bool(out) == false, "CTUD: count turun jadi 2 (down) -> di bawah preset 3, false");
+    fbd_eval_ctud(off, off, no_reset, 0, 3, false, &st);
+    out = fbd_eval_ctud(off, on, no_reset, 0, 3, false, &st);
+    CHECK(fbd_to_bool(out) == false, "CTUD manual: count turun jadi 2 (down) -> di bawah preset 3, false");
 
-    /* Reset ke nilai TERTENTU (bukan selalu 0) - fitur baru CTUD. */
-    out = fbd_eval_ctud(off, off, on, 10, 3, &st);
-    CHECK(st.count == 10, "CTUD: reset -> count jadi reset_value (10), BUKAN selalu 0");
-    CHECK(fbd_to_bool(out) == true, "CTUD: reset_value (10) >= preset (3) -> true");
+    /* Reset ke nilai TERTENTU (bukan selalu 0). */
+    out = fbd_eval_ctud(off, off, on, 10, 3, false, &st);
+    CHECK(st.count == 10, "CTUD manual: reset -> count jadi reset_value (10), BUKAN selalu 0");
+    CHECK(fbd_to_bool(out) == true, "CTUD manual: reset_value (10) >= preset (3) -> true");
 
     /* up dan down bersamaan (tepi naik keduanya) di cycle yang sama -
      * harus saling meniadakan (+1-1=0 dari nilai sebelumnya), bukan salah
      * satu diabaikan. */
     fbd_counter_state_t st2 = {0};
-    fbd_eval_ctud(off, off, no_reset, 0, 3, &st2);
-    out = fbd_eval_ctud(on, on, no_reset, 0, 3, &st2);
-    CHECK(st2.count == 0, "CTUD: up+down bersamaan (tepi naik keduanya) -> saling meniadakan, count tetap 0");
+    fbd_eval_ctud(off, off, no_reset, 0, 3, false, &st2);
+    out = fbd_eval_ctud(on, on, no_reset, 0, 3, false, &st2);
+    CHECK(st2.count == 0, "CTUD manual: up+down bersamaan (tepi naik keduanya) -> saling meniadakan, count tetap 0");
 }
 
-static void test_counter_ctl(void)
+static void test_counter_ctud_auto_reset(void)
 {
     fbd_counter_state_t st = {0};
+    fbd_value_t no_reset = fbd_make_bool(false); /* port reset diabaikan di mode auto - dibiarkan false, tidak relevan */
     fbd_value_t off = fbd_make_bool(false);
     fbd_value_t on = fbd_make_bool(true);
     fbd_value_t out;
 
-    /* preset=3, reset_value=0 -> siklus berulang 0,1,2,3->reset ke 0. */
-    out = fbd_eval_ctl(on, off, 0, 3, &st);
-    CHECK(st.count == 1, "CTL: naik 1x, count=1 (di bawah preset 3)");
-    CHECK(fbd_to_bool(out) == false, "CTL: outputs[0] selalu false");
+    /* Mode auto (auto_reset=true), preset=3, reset_value=0 -> siklus
+     * berulang 0,1,2,3->reset ke 0, TANPA port reset dipicu sama sekali. */
+    out = fbd_eval_ctud(on, off, no_reset, 0, 3, true, &st);
+    CHECK(st.count == 1, "CTUD auto: naik 1x, count=1 (di bawah preset 3)");
+    CHECK(fbd_to_bool(out) == false, "CTUD auto: count(1) < preset(3) -> false");
 
-    fbd_eval_ctl(off, off, 0, 3, &st);
-    fbd_eval_ctl(on, off, 0, 3, &st);
-    CHECK(st.count == 2, "CTL: naik lagi, count=2");
+    fbd_eval_ctud(off, off, no_reset, 0, 3, true, &st);
+    fbd_eval_ctud(on, off, no_reset, 0, 3, true, &st);
+    CHECK(st.count == 2, "CTUD auto: naik lagi, count=2");
 
-    fbd_eval_ctl(off, off, 0, 3, &st);
-    fbd_eval_ctl(on, off, 0, 3, &st);
+    fbd_eval_ctud(off, off, no_reset, 0, 3, true, &st);
+    fbd_eval_ctud(on, off, no_reset, 0, 3, true, &st);
     /* count seharusnya jadi 3 (>=preset 3), tapi auto-reset dites di
      * cycle YANG SAMA (bukan cycle berikutnya) - jadi count langsung
-     * kembali ke reset_value (0) sebelum sempat "terlihat" 3. Ini
-     * sengaja (lihat komentar fbd_eval_ctl di fbd_nodes.c): siklus
-     * berulang TANPA trigger reset manual, tanpa jeda satu cycle. */
-    CHECK(st.count == 0, "CTL: count mencapai preset (3) -> auto-reset ke 0 di cycle yang sama");
+     * kembali ke reset_value (0) sebelum sempat "terlihat" 3. */
+    CHECK(st.count == 0, "CTUD auto: count mencapai preset (3) -> auto-reset ke 0 di cycle yang sama");
 
-    fbd_eval_ctl(off, off, 0, 3, &st);
-    fbd_eval_ctl(on, off, 0, 3, &st);
-    CHECK(st.count == 1, "CTL: setelah auto-reset, naik lagi dari 0 jadi 1 - siklus berulang TANPA trigger reset manual");
+    fbd_eval_ctud(off, off, no_reset, 0, 3, true, &st);
+    fbd_eval_ctud(on, off, no_reset, 0, 3, true, &st);
+    CHECK(st.count == 1, "CTUD auto: setelah auto-reset, naik lagi dari 0 jadi 1 - siklus berulang TANPA trigger reset manual");
 
-    /* reset_value tidak selalu 0 - dites juga sesuai permintaan "reset sesuai angka". */
+    /* reset_value tidak selalu 0 - "reset sesuai angka". */
     fbd_counter_state_t st2 = {0};
-    fbd_eval_ctl(on, off, 100, 2, &st2); /* count=1 */
-    fbd_eval_ctl(off, off, 100, 2, &st2);
-    fbd_eval_ctl(on, off, 100, 2, &st2); /* count=2 -> >=preset -> auto-reset ke 100 */
-    CHECK(st2.count == 100, "CTL: auto-reset ke reset_value custom (100), bukan selalu 0");
+    fbd_eval_ctud(on, off, no_reset, 100, 2, true, &st2); /* count=1 */
+    fbd_eval_ctud(off, off, no_reset, 100, 2, true, &st2);
+    fbd_eval_ctud(on, off, no_reset, 100, 2, true, &st2); /* count=2 -> >=preset -> auto-reset ke 100 */
+    CHECK(st2.count == 100, "CTUD auto: auto-reset ke reset_value custom (100), bukan selalu 0");
+
+    /* Port reset SENGAJA di-set true di mode auto - harus DIABAIKAN
+     * (bukan trigger reset manual), supaya kedua mode benar-benar
+     * eksklusif, tidak saling bocor perilaku. */
+    fbd_counter_state_t st3 = {0};
+    out = fbd_eval_ctud(on, off, on /* reset=true, harus diabaikan */, 999, 5, true, &st3);
+    CHECK(st3.count == 1, "CTUD auto: port reset di-set true TETAP DIABAIKAN (mode auto), count naik normal jadi 1, bukan jadi 999");
 }
 
 int main(void)
@@ -252,8 +260,8 @@ int main(void)
     test_timer_ton();
     test_timer_tof_tp();
     test_timer_osc();
-    test_counter_ctud();
-    test_counter_ctl();
+    test_counter_ctud_manual_reset();
+    test_counter_ctud_auto_reset();
 
     printf("\n%s (%d gagal)\n", g_fail == 0 ? "SEMUA TEST LOLOS" : "ADA TEST GAGAL", g_fail);
     return g_fail == 0 ? 0 : 1;

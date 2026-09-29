@@ -69,7 +69,6 @@ static const char *node_type_to_str(fbd_node_type_t type)
         case FBD_NODE_TP:           return "tp";
         case FBD_NODE_OSC:          return "osc";
         case FBD_NODE_CTU:          return "ctu";
-        case FBD_NODE_CTL:          return "ctl";
         case FBD_NODE_DIGITAL_IN:   return "digital_input";
         case FBD_NODE_DIGITAL_OUT:  return "digital_output";
         case FBD_NODE_ANALOG_IN:    return "analog_input";
@@ -300,27 +299,19 @@ static bool parse_params(const cJSON *params, fbd_node_t *node, char *err, size_
         case FBD_NODE_CTU: {
             /* reset_value BUKAN params - itu port input ke-4 (in3), bisa
              * datang dari node lain (mis. Constant), bukan angka tetap di
-             * JSON node ini sendiri. Lihat fbd_graph.c evaluate_node(). */
+             * JSON node ini sendiri, dipakai di KEDUA mode auto_reset.
+             * Lihat fbd_graph.c evaluate_node(). */
             const cJSON *preset = cJSON_GetObjectItem(params, "preset");
             if (!preset) {
                 set_err(err, err_len, "ctu: params.preset wajib");
                 return false;
             }
             node->params.preset = (int32_t)cJSON_GetNumberValue(preset);
-            break;
-        }
-        case FBD_NODE_CTL: {
-            /* reset_value DI SINI params (ctl_reset_value) - beda dari CTU,
-             * karena CTL auto-reset tanpa trigger eksternal, jadi nilainya
-             * cukup angka tetap dikonfigurasi user, bukan port. */
-            const cJSON *preset = cJSON_GetObjectItem(params, "preset");
-            const cJSON *reset_value = cJSON_GetObjectItem(params, "reset_value");
-            if (!preset || !reset_value) {
-                set_err(err, err_len, "ctl: params.preset/reset_value wajib");
-                return false;
-            }
-            node->params.preset = (int32_t)cJSON_GetNumberValue(preset);
-            node->params.ctl_reset_value = (int32_t)cJSON_GetNumberValue(reset_value);
+            /* auto_reset opsional, default false - kompatibel dengan
+             * dokumen lama yang belum tahu field ini (perilaku sama
+             * seperti sebelumnya: reset manual lewat port). */
+            const cJSON *auto_reset = cJSON_GetObjectItem(params, "auto_reset");
+            node->params.ctu_auto_reset = auto_reset ? cJSON_IsTrue(auto_reset) : false;
             break;
         }
         case FBD_NODE_DIGITAL_IN: {
@@ -706,10 +697,7 @@ static cJSON *serialize_params(const fbd_node_t *node)
             break;
         case FBD_NODE_CTU:
             cJSON_AddNumberToObject(params, "preset", node->params.preset);
-            break;
-        case FBD_NODE_CTL:
-            cJSON_AddNumberToObject(params, "preset", node->params.preset);
-            cJSON_AddNumberToObject(params, "reset_value", node->params.ctl_reset_value);
+            cJSON_AddBoolToObject(params, "auto_reset", node->params.ctu_auto_reset);
             break;
         case FBD_NODE_DIGITAL_IN:
             cJSON_AddNumberToObject(params, "pin", node->params.pin);

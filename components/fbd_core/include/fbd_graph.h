@@ -38,7 +38,6 @@ typedef enum {
     FBD_NODE_TP,
     FBD_NODE_OSC,
     FBD_NODE_CTU,
-    FBD_NODE_CTL,
     FBD_NODE_DIGITAL_IN,
     FBD_NODE_DIGITAL_OUT,
     FBD_NODE_ANALOG_IN,
@@ -94,8 +93,8 @@ typedef struct {
     float clamp_min, clamp_max;       /* FBD_NODE_CLAMP */
     uint32_t delay_ms;                 /* FBD_NODE_TON/TOF/TP */
     uint32_t osc_on_ms, osc_off_ms;    /* FBD_NODE_OSC: durasi fase ON/OFF */
-    int32_t preset;                    /* FBD_NODE_CTU/CTL: threshold (CTU: output true; CTL: batas auto-reset). CTU reset_value BUKAN params - lihat inputs[3] */
-    int32_t ctl_reset_value;           /* FBD_NODE_CTL: nilai auto-reset saat count>=preset (params, bukan port - beda dari CTU) */
+    int32_t preset;                    /* FBD_NODE_CTU: threshold (batas naik / auto-reset). reset_value port (inputs[3]) dipakai di kedua mode */
+    bool ctu_auto_reset;                /* FBD_NODE_CTU: true = reset otomatis begitu count>=preset (port reset diabaikan); false = reset manual lewat port reset */
     int pin;                            /* FBD_NODE_DIGITAL_IN/OUT/ANALOG_IN/PWM_OUT/SERVO */
     bool invert;                        /* FBD_NODE_DIGITAL_IN/OUT */
     fbd_pin_mode_t pin_mode;            /* FBD_NODE_DIGITAL_IN saja */

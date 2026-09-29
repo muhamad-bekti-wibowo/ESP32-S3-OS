@@ -143,28 +143,19 @@ static fbd_value_t evaluate_node(fbd_node_t *node, fbd_var_store_t *vars, uint32
         case FBD_NODE_OSC:
             return fbd_eval_osc(node->params.osc_on_ms, node->params.osc_off_ms, now_ms, &node->state.timer);
         case FBD_NODE_CTU: {
-            /* Port: in0=up, in1=down, in2=reset, in3=reset_value (angka
-             * tujuan reset, BUKAN selalu 0 - bisa dari node lain, mis.
-             * Constant atau hasil hitungan). reset_value dibaca live tiap
-             * cycle (bukan cuma saat reset aktif) supaya nilainya selalu
-             * konsisten kapan pun reset dipicu.
+            /* Port: in0=up, in1=down, in2=reset (diabaikan kalau
+             * params.ctu_auto_reset=true), in3=reset_value (angka tujuan
+             * reset di KEDUA mode, BUKAN selalu 0). reset_value dibaca
+             * live tiap cycle supaya nilainya selalu konsisten kapan pun
+             * reset dipicu (manual) atau tercapai (auto).
              * outputs[0]=bool (count>=preset), outputs[1]=angka count
              * aktual (state->count dibaca SETELAH fbd_eval_ctud() selesai
              * memutasinya, supaya reflect nilai paling baru cycle ini). */
             int32_t reset_value = (int32_t)fbd_to_float(in[3]);
-            fbd_value_t result = fbd_eval_ctud(in[0], in[1], in[2], reset_value, node->params.preset, &node->state.counter);
+            fbd_value_t result = fbd_eval_ctud(in[0], in[1], in[2], reset_value, node->params.preset,
+                                                node->params.ctu_auto_reset, &node->state.counter);
             *out_secondary = fbd_make_int(node->state.counter.count);
             return result;
-        }
-        case FBD_NODE_CTL: {
-            /* Port: in0=up, in1=down (sama seperti CTU) - TIDAK ADA port
-             * reset/reset_value, auto-reset params (ctl_reset_value) dipakai
-             * begitu count>=preset, tanpa trigger eksternal apa pun. outputs[0]
-             * SELALU false (tidak berguna sebagai threshold - count sendiri
-             * jadi satu-satunya output berarti di outputs[1]). */
-            fbd_eval_ctl(in[0], in[1], node->params.ctl_reset_value, node->params.preset, &node->state.counter);
-            *out_secondary = fbd_make_int(node->state.counter.count);
-            return fbd_make_bool(false);
         }
         case FBD_NODE_DIGITAL_IN: {
             /* Backend simulated: no-op, nilai tetap datang dari inputs[0]

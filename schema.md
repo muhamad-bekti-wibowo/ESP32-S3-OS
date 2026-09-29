@@ -128,23 +128,23 @@ Contoh:
 | `tof` | `{ "delay_ms": 2000 }` | sama seperti `ton` |
 | `tp` | `{ "pulse_ms": 500 }` | sama seperti `ton` |
 | `osc` | `{ "on_ms": 500, "off_ms": 500 }` | sama seperti `ton` (`running` dipakai sebagai fase ON/OFF sekarang, bukan "sedang menghitung") |
-| `ctu` | `{ "preset": 3 }` | `{ "count": 0, "prev_up": false, "prev_down": false }` |
-| `ctl` | `{ "preset": 5, "reset_value": 0 }` | sama seperti `ctu` |
+| `ctu` | `{ "preset": 3, "auto_reset": false }` | `{ "count": 0, "prev_up": false, "prev_down": false }` |
 
 Contoh:
 ```json
 { "id": "t1", "type": "ton", "params": { "delay_ms": 2000 } }
 ```
 
-`ctu` (Counter Up/Down, CTUD) punya **4 input port** dan **2 output port**
-— beda dari node timer lain di atas:
+`ctu` (Counter Up/Down) punya **4 input port** dan **2 output port** —
+beda dari node timer lain di atas. Perilaku port `reset` tergantung
+`params.auto_reset`:
 
 | Port input | Arti |
 |---|---|
 | `in0` (up) | Hitungan +1 tiap transisi false→true (edge naik) |
 | `in1` (down) | Hitungan -1 tiap transisi false→true (edge naik), independen dari `up` |
-| `in2` (reset) | Selama true, hitungan dipaksa ke nilai `in3` (reset_value) |
-| `in3` (reset_value) | Nilai tujuan reset — **bukan selalu 0**, bisa dari `const` atau node lain, dibaca live tiap scan cycle |
+| `in2` (reset) | **Diabaikan sepenuhnya kalau `auto_reset: true`.** Kalau `auto_reset: false` — selama true, hitungan dipaksa ke nilai `in3` |
+| `in3` (reset_value) | Nilai tujuan reset — **bukan selalu 0**, dipakai di KEDUA mode, dibaca live tiap scan cycle |
 
 | Port output | Arti |
 |---|---|
@@ -155,46 +155,38 @@ Contoh:
 scan cycle yang sama, keduanya tetap diproses (+1 dan -1), saling
 meniadakan, bukan salah satu diabaikan.
 
-Contoh — counter naik/turun tombol fisik, reset ke 10:
+**`auto_reset: false` (default, mode manual)** — port `reset` adalah
+saklar yang harus di-trigger eksplisit (mis. dari tombol/timer). Kalau
+port `reset` dibiarkan kosong (selalu false), hitungan naik/turun tak
+terbatas dari `up`/`down`, `reset_value` tidak pernah dipakai.
+
+Contoh — counter naik/turun tombol fisik, reset manual ke 10:
 ```json
 { "id": "btn_up", "type": "digital_input", "params": { "pin": 4, "mode": "pullup", "invert": true, "hw_mode": "real" } }
 { "id": "btn_down", "type": "digital_input", "params": { "pin": 5, "mode": "pullup", "invert": true, "hw_mode": "real" } }
 { "id": "btn_reset", "type": "digital_input", "params": { "pin": 6, "mode": "pullup", "invert": true, "hw_mode": "real" } }
 { "id": "reset_to", "type": "const", "params": { "datatype": "int32", "value": 10 } }
-{ "id": "counter1", "type": "ctu", "params": { "preset": 20 } }
+{ "id": "counter1", "type": "ctu", "params": { "preset": 20, "auto_reset": false } }
 ```
 (link: `btn_up→counter1.in0`, `btn_down→counter1.in1`, `btn_reset→counter1.in2`, `reset_to→counter1.in3`)
 
-### Counter Loop (CTL) — variasi CTU yang auto-reset sendiri
-
-`ctl` sama seperti `ctu` (up/down independen), TAPI **tanpa port
-reset/reset_value** — begitu hitungan `>= params.preset`, **otomatis**
-dikembalikan ke `params.reset_value` di scan cycle yang sama, tanpa
-perlu trigger eksternal apa pun. Cocok untuk pola berulang (mis. animasi
-LED bertahap) yang butuh siklus otomatis, bukan reset manual dari
-tombol/timer.
-
-| Port input | Arti |
-|---|---|
-| `in0` (up) | Hitungan +1 tiap transisi false→true |
-| `in1` (down) | Hitungan -1 tiap transisi false→true |
-
-| Port output | Arti |
-|---|---|
-| `out0` | **Selalu `false`** — tidak berguna sebagai threshold di node ini |
-| `out1` | `int32`, hitungan itu sendiri (satu-satunya output berarti) |
-
-**Beda penting dari `ctu`:** `reset_value` di `ctl` adalah **params**
-(angka tetap dikonfigurasi user), bukan port — karena auto-reset tidak
-butuh trigger dari node lain.
+**`auto_reset: true` (mode loop/self-resetting)** — port `reset`
+diabaikan sepenuhnya (boleh dibiarkan tanpa sambungan). Begitu hitungan
+`>= params.preset`, **otomatis** dikembalikan ke nilai `in3`
+(reset_value) di scan cycle yang sama — tidak pernah "terlihat"
+melebihi preset walau cuma sesaat. Cocok untuk pola berulang (mis.
+animasi LED bertahap) tanpa perlu node tombol/timer tambahan untuk
+reset.
 
 Contoh — siklus 0→4 berulang terus (mis. untuk indeks animasi):
 ```json
 { "id": "clk1", "type": "osc", "params": { "on_ms": 200, "off_ms": 200 } }
-{ "id": "idx1", "type": "ctl", "params": { "preset": 5, "reset_value": 0 } }
+{ "id": "zero1", "type": "const", "params": { "datatype": "int32", "value": 0 } }
+{ "id": "idx1", "type": "ctu", "params": { "preset": 5, "auto_reset": true } }
 ```
-(link: `clk1→idx1.in0`) — `idx1.out1` menghasilkan 0,1,2,3,4,0,1,2,3,4,...
-terus-menerus tiap `clk1` berkedip.
+(link: `clk1→idx1.in0`, `zero1→idx1.in3`) — `idx1.out1` menghasilkan
+0,1,2,3,4,0,1,2,3,4,... terus-menerus tiap `clk1` berkedip, port `in2`
+(reset) tidak perlu disambung sama sekali karena diabaikan di mode ini.
 
 `osc` (osilator/clock generator) **tidak punya input** — output bergantian
 `true`/`false` terus-menerus tanpa dipicu apa pun, dimulai dari fase

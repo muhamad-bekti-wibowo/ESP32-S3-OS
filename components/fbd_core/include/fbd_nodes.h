@@ -89,20 +89,20 @@ typedef struct {
 /* CTUD (counter up/down): count naik 1 tiap tepi naik (OFF->ON) di port
  * up, turun 1 tiap tepi naik di port down - keduanya independen, bisa
  * naik dan turun di scan cycle yang sama kalau kebetulan kedua tepi naik
- * bersamaan (tidak saling membatalkan). reset (tepi naik) mengembalikan
- * count ke reset_value (BUKAN selalu 0 - beda dari CTU versi lama).
- * Output true saat count >= preset_value. */
+ * bersamaan (tidak saling membatalkan).
+ *
+ * auto_reset=false (mode manual): port reset harus di-trigger eksplisit
+ * (mis. dari tombol/timer) - selama true, count dipaksa ke reset_value
+ * (BUKAN selalu 0). Output true saat count >= preset_value.
+ *
+ * auto_reset=true (mode loop/self-resetting): port reset DIABAIKAN -
+ * begitu count >= preset_value, OTOMATIS kembali ke reset_value di scan
+ * cycle yang sama (count tidak pernah "terlihat" melebihi preset walau
+ * cuma sesaat). Cocok untuk pola berulang (mis. animasi LED bertahap:
+ * 0,1,2,3,0,1,2,3...) tanpa perlu node tombol/timer tambahan. */
 fbd_value_t fbd_eval_ctud(fbd_value_t up, fbd_value_t down, fbd_value_t reset,
-                           int32_t reset_value, int32_t preset_value, fbd_counter_state_t *state);
-
-/* CTL (counter loop/self-resetting): sama seperti CTUD tapi TANPA port
- * reset manual - begitu count >= preset_value, OTOMATIS kembali ke
- * reset_value di scan cycle yang sama (bukan menunggu trigger eksternal).
- * Cocok untuk pola berulang (mis. animasi LED bertahap: 0,1,2,3,0,1,2,3...)
- * tanpa perlu node tombol/timer tambahan untuk reset. up/down tetap
- * independen sama seperti CTUD. */
-fbd_value_t fbd_eval_ctl(fbd_value_t up, fbd_value_t down,
-                          int32_t reset_value, int32_t preset_value, fbd_counter_state_t *state);
+                           int32_t reset_value, int32_t preset_value, bool auto_reset,
+                           fbd_counter_state_t *state);
 
 #ifdef __cplusplus
 }
