@@ -21,6 +21,7 @@ const NODE_ICONS = {
     pwm:        '<path d="M3 15h3V8h3v7h3V6h3v9h3v-4h2"/>',
     servo:      '<circle cx="9" cy="12" r="4"/><path d="M9 8V4M13 4h4M17 4v4"/><path d="M17 12h4"/>',
     rgb:        '<circle cx="8" cy="8" r="3"/><circle cx="16" cy="8" r="3"/><circle cx="12" cy="15" r="3"/>',
+    ultrasonic: '<rect x="3" y="9" width="6" height="6" rx="1"/><path d="M11 9c2 0 3 2 3 3s-1 3-3 3"/><path d="M15 6c3 0 5 3 5 6s-2 6-5 6"/>',
     i2c:        '<rect x="3" y="5" width="8" height="14" rx="1"/><path d="M15 8h6M15 12h6M15 16h6"/>',
     i2c_burst:  '<rect x="3" y="4" width="8" height="16" rx="1"/><path d="M15 6h6M15 10h6M15 14h6M15 18h6"/>',
     sys:        '<circle cx="11" cy="11" r="7"/><path d="M11 4v14M4 11h14"/>',

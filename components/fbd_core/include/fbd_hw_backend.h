@@ -45,6 +45,17 @@ typedef struct {
      * cocok untuk array warna per-LED). r/g/b masing-masing 0-255. */
     void (*ws2812_init)(int pin, int count);
     void (*ws2812_write)(int pin, int count, uint8_t r, uint8_t g, uint8_t b);
+
+    /* --- Sensor jarak ultrasonik (HC-SR04 dkk, trig+echo) ---
+     * BLOCKING measurement (kirim trig, tunggu echo, ukur durasi) - beda
+     * dari node I/O lain yang non-blocking, karena jarak DIHITUNG dari
+     * durasi pulsa echo itu sendiri, tidak ada cara lain. Timeout wajib
+     * pendek (lihat ULTRASONIC_TIMEOUT_US di fbd_hw_real.c) supaya tidak
+     * menahan scan cycle - echo lebih lama dari itu dianggap error
+     * (out-of-range atau sensor tidak terpasang), BUKAN salah baca jarak
+     * jauh. out_distance_cm diisi jarak dalam cm kalau sukses. */
+    void (*ultrasonic_init)(int trig_pin, int echo_pin);
+    bool (*ultrasonic_read)(int trig_pin, int echo_pin, float *out_distance_cm);
 } fbd_hw_backend_t;
 
 /* Backend simulated: tidak menyentuh register apa pun, dipakai default

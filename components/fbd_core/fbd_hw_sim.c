@@ -69,6 +69,22 @@ static void sim_ws2812_write(int pin, int count, uint8_t r, uint8_t g, uint8_t b
     (void)pin; (void)count; (void)r; (void)g; (void)b;
 }
 
+static void sim_ultrasonic_init(int trig_pin, int echo_pin)
+{
+    (void)trig_pin; (void)echo_pin;
+}
+
+static bool sim_ultrasonic_read(int trig_pin, int echo_pin, float *out_distance_cm)
+{
+    /* Tidak pernah dipanggil sebenarnya - fbd_graph.c pakai
+     * params.sim_distance_cm langsung tanpa lewat backend saat
+     * hw_mode=simulated (sama pola dengan analog_input.sim_value).
+     * Disediakan di sini cuma supaya struct backend lengkap/tidak NULL. */
+    (void)trig_pin; (void)echo_pin;
+    *out_distance_cm = 0.0f;
+    return true;
+}
+
 static const fbd_hw_backend_t s_sim_backend = {
     .digital_init_input = sim_digital_init_input,
     .digital_init_output = sim_digital_init_output,
@@ -82,6 +98,8 @@ static const fbd_hw_backend_t s_sim_backend = {
     .servo_write = sim_servo_write,
     .ws2812_init = sim_ws2812_init,
     .ws2812_write = sim_ws2812_write,
+    .ultrasonic_init = sim_ultrasonic_init,
+    .ultrasonic_read = sim_ultrasonic_read,
 };
 
 const fbd_hw_backend_t *fbd_hw_sim_backend(void)

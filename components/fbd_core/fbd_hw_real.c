@@ -8,6 +8,8 @@
 #include "driver/rmt_tx.h"
 #include "driver/rmt_encoder.h"
 #include "esp_adc/adc_oneshot.h"
+#include "esp_timer.h"
+#include "esp_rom_sys.h"
 #include "esp_log.h"
 #include <string.h>
 
@@ -343,6 +345,84 @@ static void real_ws2812_write(int pin, int count, uint8_t r, uint8_t g, uint8_t 
     rmt_tx_wait_all_done(s_ws2812_pins[slot].channel, 100);
 }
 
+/* ---- Sensor jarak ultrasonik (HC-SR04 dkk, trig+echo) ----
+ * BLOCKING measurement - satu-satunya cara mengukur jarak dari sensor
+ * ini adalah menghitung durasi pulsa echo secara langsung, tidak ada
+ * interrupt/DMA yang membebaskan CPU di sini (beda dari RMT WS2812 yang
+ * async). Timeout DIBATASI KETAT (lihat ULTRASONIC_TIMEOUT_US) supaya
+ * satu node ini tidak menahan scan cycle terlalu lama kalau sensor
+ * tidak terpasang/echo tidak pernah naik/turun - konsisten dengan
+ * prinsip proyek "jangan pernah menahan scan cycle" yang sudah dipegang
+ * untuk I2C_BRIDGE_TIMEOUT_MS.
+ *
+ * ULTRASONIC_TIMEOUT_US = 10000 (10ms) -> jangkauan efektif ~1.7m
+ * (10ms * 343m/s / 2), BUKAN jangkauan penuh spec HC-SR04 (~4m/23ms) -
+ * trade-off disengaja: timeout lebih pendek dari SCAN_PERIOD_MS (20ms)
+ * supaya node ini sendirian tidak pernah membuat satu scan cycle
+ * melebihi periodenya sendiri. Echo lebih lama dari batas ini dianggap
+ * timeout/out-of-range (return false), BUKAN jarak jauh yang valid. */
+#define ULTRASONIC_TIMEOUT_US 10000
+#define ULTRASONIC_SOUND_SPEED_CM_PER_US 0.0343f /* 343 m/s = 0.0343 cm/us */
+
+static void real_ultrasonic_init(int trig_pin, int echo_pin)
+{
+    gpio_config_t trig_cfg = {
+        .pin_bit_mask = 1ULL << trig_pin,
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&trig_cfg);
+    gpio_set_level((gpio_num_t)trig_pin, 0);
+
+    gpio_config_t echo_cfg = {
+        .pin_bit_mask = 1ULL << echo_pin,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&echo_cfg);
+}
+
+static bool real_ultrasonic_read(int trig_pin, int echo_pin, float *out_distance_cm)
+{
+    *out_distance_cm = 0.0f;
+
+    /* Trig pulse 10us (spec HC-SR04: minimal 10us HIGH untuk memicu
+     * pengukuran) - esp_rom_delay_us blocking singkat, sama pola dengan
+     * i2c_bridge_delay_us untuk WS2812/I2C burst. */
+    gpio_set_level((gpio_num_t)trig_pin, 1);
+    esp_rom_delay_us(10);
+    gpio_set_level((gpio_num_t)trig_pin, 0);
+
+    int64_t start_wait = esp_timer_get_time();
+    /* Tunggu echo naik ke HIGH (sensor mulai mengukur). Timeout di sini
+     * pakai SISA budget ULTRASONIC_TIMEOUT_US, bukan alokasi tetap
+     * terpisah - total waktu tunggu-naik + ukur-durasi tidak pernah
+     * melebihi ULTRASONIC_TIMEOUT_US. */
+    while (gpio_get_level((gpio_num_t)echo_pin) == 0) {
+        if (esp_timer_get_time() - start_wait > ULTRASONIC_TIMEOUT_US) {
+            return false; /* echo tidak pernah naik - sensor tidak terpasang/rusak */
+        }
+    }
+
+    int64_t echo_start = esp_timer_get_time();
+    while (gpio_get_level((gpio_num_t)echo_pin) == 1) {
+        if (esp_timer_get_time() - start_wait > ULTRASONIC_TIMEOUT_US) {
+            return false; /* echo tidak pernah turun - di luar jangkauan efektif atau macet */
+        }
+    }
+    int64_t echo_duration_us = esp_timer_get_time() - echo_start;
+
+    /* Jarak = (durasi pulsa * kecepatan suara) / 2 - dibagi 2 karena
+     * pulsa echo mengukur waktu tempuh PULANG-PERGI (ke objek dan
+     * kembali), bukan satu arah. */
+    *out_distance_cm = ((float)echo_duration_us * ULTRASONIC_SOUND_SPEED_CM_PER_US) / 2.0f;
+    return true;
+}
+
 static const fbd_hw_backend_t s_real_backend = {
     .digital_init_input = real_digital_init_input,
     .digital_init_output = real_digital_init_output,
@@ -356,6 +436,8 @@ static const fbd_hw_backend_t s_real_backend = {
     .servo_write = real_servo_write,
     .ws2812_init = real_ws2812_init,
     .ws2812_write = real_ws2812_write,
+    .ultrasonic_init = real_ultrasonic_init,
+    .ultrasonic_read = real_ultrasonic_read,
 };
 
 const fbd_hw_backend_t *fbd_hw_real_backend(void)

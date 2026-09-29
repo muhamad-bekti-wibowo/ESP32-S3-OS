@@ -75,6 +75,7 @@ static const char *node_type_to_str(fbd_node_type_t type)
         case FBD_NODE_PWM_OUT:      return "pwm_output";
         case FBD_NODE_SERVO:        return "servo";
         case FBD_NODE_WS2812:       return "ws2812";
+        case FBD_NODE_ULTRASONIC:   return "ultrasonic";
         case FBD_NODE_I2C_READ_REG:  return "i2c_read_reg";
         case FBD_NODE_I2C_WRITE_REG: return "i2c_write_reg";
         case FBD_NODE_I2C_WRITE_BURST: return "i2c_write_burst";
@@ -417,6 +418,28 @@ static bool parse_params(const cJSON *params, fbd_node_t *node, char *err, size_
                 !is_pin_safe_for_real_gpio(node->params.pin, err, err_len)) return false;
             break;
         }
+        case FBD_NODE_ULTRASONIC: {
+            const cJSON *pin = cJSON_GetObjectItem(params, "pin");
+            const cJSON *echo_pin = cJSON_GetObjectItem(params, "echo_pin");
+            if (!pin || !echo_pin) {
+                set_err(err, err_len, "ultrasonic: params.pin (trig)/echo_pin wajib");
+                return false;
+            }
+            node->params.pin = (int)cJSON_GetNumberValue(pin);
+            node->params.ultrasonic_echo_pin = (int)cJSON_GetNumberValue(echo_pin);
+            if (node->params.pin == node->params.ultrasonic_echo_pin) {
+                set_err(err, err_len, "ultrasonic: params.pin (trig) dan echo_pin harus berbeda");
+                return false;
+            }
+            const cJSON *sim_distance = cJSON_GetObjectItem(params, "sim_distance_cm");
+            node->params.ultrasonic_sim_distance_cm = sim_distance ? (float)cJSON_GetNumberValue(sim_distance) : 0.0f;
+            if (!parse_hw_mode(params, &node->params.hw_mode, err, err_len)) return false;
+            if (node->params.hw_mode == FBD_HW_REAL) {
+                if (!is_pin_safe_for_real_gpio(node->params.pin, err, err_len)) return false;
+                if (!is_pin_safe_for_real_gpio(node->params.ultrasonic_echo_pin, err, err_len)) return false;
+            }
+            break;
+        }
         case FBD_NODE_I2C_READ_REG: {
             const cJSON *bus = cJSON_GetObjectItem(params, "bus");
             const cJSON *address = cJSON_GetObjectItem(params, "address");
@@ -732,6 +755,12 @@ static cJSON *serialize_params(const fbd_node_t *node)
         case FBD_NODE_WS2812:
             cJSON_AddNumberToObject(params, "pin", node->params.pin);
             cJSON_AddNumberToObject(params, "count", node->params.ws2812_count);
+            cJSON_AddStringToObject(params, "hw_mode", hw_mode_to_str(node->params.hw_mode));
+            break;
+        case FBD_NODE_ULTRASONIC:
+            cJSON_AddNumberToObject(params, "pin", node->params.pin);
+            cJSON_AddNumberToObject(params, "echo_pin", node->params.ultrasonic_echo_pin);
+            cJSON_AddNumberToObject(params, "sim_distance_cm", node->params.ultrasonic_sim_distance_cm);
             cJSON_AddStringToObject(params, "hw_mode", hw_mode_to_str(node->params.hw_mode));
             break;
         case FBD_NODE_I2C_READ_REG:

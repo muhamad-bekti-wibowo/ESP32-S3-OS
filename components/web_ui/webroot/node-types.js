@@ -25,6 +25,7 @@ const CATEGORY_LABELS = {
     io_digital: 'I/O Digital',
     io_analog: 'I/O Analog & PWM',
     io_led: 'LED RGB',
+    io_sensor: 'Sensor',
     i2c: 'I2C',
     system: 'System',
 };
@@ -212,6 +213,19 @@ const NODE_TYPES = {
         ],
     },
 
+    // ---- Sensor jarak ultrasonik (HC-SR04 dkk, trig+echo) ----
+    ultrasonic: {
+        label: 'Ultrasonic', inputs: 0, outputs: 1, category: 'io_sensor', icon: 'ultrasonic',
+        help: 'Sensor jarak ultrasonik (HC-SR04 dkk) - Pin = pin Trig, Echo Pin = pin Echo (harus 2 pin berbeda). Pengukuran BLOCKING (kirim trig, tunggu echo, ukur durasi) dengan timeout 10ms -> jangkauan efektif sekitar 1.7m (BUKAN jangkauan penuh spec sensor ~4m), supaya tidak menahan scan cycle terlalu lama. Output = jarak dalam cm. Kalau timeout/sensor tidak terpasang, output jadi 0 - cek field "error" lewat live monitor (outputs[1]) untuk membedakan "0cm valid" dari "gagal ukur". HW Mode "simulated" pakai Sim Distance (slider), tidak menyentuh GPIO sama sekali.',
+        fields: [
+            { key: 'pin', label: 'Pin (Trig)', type: 'number', default: 4 },
+            { key: 'echo_pin', label: 'Pin (Echo)', type: 'number', default: 5 },
+            { key: 'hw_mode', label: 'HW Mode', type: 'select',
+              options: ['simulated', 'real'], default: 'simulated' },
+            { key: 'sim_distance_cm', label: 'Sim Distance (cm)', type: 'range', min: 0, max: 170, default: 50 },
+        ],
+    },
+
     // ---- I2C primitive (Level 2, register-level, BUKAN driver sensor) ----
     i2c_read_reg: {
         label: 'I2C Read Reg', inputs: 0, outputs: 2, category: 'i2c', icon: 'i2c',
@@ -288,4 +302,5 @@ const INPUT_PORT_LABELS = {
 const OUTPUT_PORT_LABELS = {
     i2c_read_reg: ['raw_bytes', 'error'],
     ctu: ['bool (count >= preset)', 'count (angka)'],
+    ultrasonic: ['jarak (cm)', 'error'],
 };

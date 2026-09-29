@@ -257,6 +257,27 @@ static fbd_value_t evaluate_node(fbd_node_t *node, fbd_var_store_t *vars, uint32
              * inputs[] lengkap kalau perlu r/g/b masing-masing). */
             return fbd_make_int(r);
         }
+        case FBD_NODE_ULTRASONIC: {
+            /* outputs[0] = jarak (cm), outputs[1] = error (bool, true
+             * kalau timeout/out-of-range) - konsisten pola dengan
+             * i2c_read_reg (raw_bytes + error), supaya "0 cm valid" bisa
+             * dibedakan dari "gagal ukur" tanpa harus menebak dari angka
+             * 0 itu sendiri (0 cm secara fisik memang mungkin terjadi
+             * kalau objek nempel persis di sensor). */
+            if (node->params.hw_mode != FBD_HW_REAL) {
+                *out_secondary = fbd_make_bool(false);
+                return fbd_make_float(node->params.ultrasonic_sim_distance_cm);
+            }
+            const fbd_hw_backend_t *hw = fbd_hw_get_backend();
+            if (!node->state.hw_initialized) {
+                hw->ultrasonic_init(node->params.pin, node->params.ultrasonic_echo_pin);
+                node->state.hw_initialized = true;
+            }
+            float distance_cm = 0.0f;
+            bool ok = hw->ultrasonic_read(node->params.pin, node->params.ultrasonic_echo_pin, &distance_cm);
+            *out_secondary = fbd_make_bool(!ok);
+            return fbd_make_float(ok ? distance_cm : 0.0f);
+        }
         case FBD_NODE_I2C_READ_REG: {
             uint8_t buf[I2C_BRIDGE_MAX_DATA_LEN];
             uint8_t len = node->params.i2c_data_len;

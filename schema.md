@@ -287,6 +287,33 @@ Sama seperti `analog_input`/`pwm_output`/`servo`, kriteria konsistensi
 mode berlaku: desain dulu di `hw_mode: "simulated"`, baru pindah ke
 `"real"` setelah yakin logikanya benar.
 
+### Sensor jarak ultrasonik (Level 1, HC-SR04 dkk, trig+echo)
+
+Pengukuran **blocking** (bukan async seperti WS2812/RMT) — satu-satunya
+cara mengukur jarak dari sensor ini adalah mengukur durasi pulsa echo
+secara langsung. Timeout dibatasi **10ms** (jangkauan efektif ~1.7m,
+BUKAN jangkauan penuh spec sensor ~4m/23ms) — trade-off disengaja supaya
+node ini sendirian tidak pernah menahan satu scan cycle (20ms) melebihi
+periodenya sendiri, konsisten dengan aturan wajib `I2C_BRIDGE_TIMEOUT_MS`
+untuk I2C.
+
+| `type` | `params` | Keterangan |
+|---|---|---|
+| `ultrasonic` | `{ "pin": 4, "echo_pin": 5, "hw_mode": "simulated", "sim_distance_cm": 50 }` | `pin`: pin Trig. `echo_pin`: pin Echo (WAJIB berbeda dari `pin`, ditolak parser kalau sama). Tidak punya input. Output: `outputs[0]`=jarak (`float`, cm), `outputs[1]`=error (`bool`, `true` kalau timeout/sensor tidak terpasang — dipakai membedakan "0cm valid" dari "gagal ukur", karena 0cm secara fisik memang mungkin terjadi kalau objek nempel di sensor). `sim_distance_cm`: nilai dipakai saat `hw_mode: "simulated"`, di-set lewat slider UI |
+
+Contoh — LED nyala kalau ada objek dalam jarak 20cm:
+```json
+{ "id": "us1", "type": "ultrasonic", "params": { "pin": 4, "echo_pin": 5, "hw_mode": "real" } }
+{ "id": "th1", "type": "const", "params": { "datatype": "float", "value": 20 } }
+{ "id": "cmp1", "type": "compare", "params": { "op": "lt" } }
+{ "id": "led1", "type": "digital_output", "params": { "pin": 6, "invert": false, "hw_mode": "real" } }
+```
+(link: `us1→cmp1.in0`, `th1→cmp1.in1`, `cmp1→led1.in0`)
+
+Sama seperti node fisik lain, kriteria konsistensi mode berlaku: desain
+dulu di `hw_mode: "simulated"` (slider Sim Distance), baru pindah ke
+`"real"` setelah yakin logikanya benar.
+
 ### I2C primitive register-level (Level 2)
 
 **HANYA primitive generik, BUKAN driver sensor spesifik** (plan.md prinsip

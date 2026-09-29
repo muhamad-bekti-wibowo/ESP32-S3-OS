@@ -193,6 +193,57 @@ static void test_ws2812_count_out_of_range_rejected(void)
     cJSON_Delete(root);
 }
 
+static void test_ultrasonic_roundtrip(void)
+{
+    const char *json =
+    "{ \"version\": 1, \"nodes\": ["
+    "  { \"id\": \"us1\", \"type\": \"ultrasonic\", \"params\": { \"pin\": 4, \"echo_pin\": 5, \"hw_mode\": \"real\", \"sim_distance_cm\": 50 } }"
+    "], \"links\": [] }";
+
+    cJSON *root = cJSON_Parse(json);
+    fbd_graph_t g;
+    char err[FBD_JSON_ERR_LEN] = {0};
+    bool ok = fbd_json_parse(root, &g, err, sizeof(err));
+    CHECK(ok, "ultrasonic berhasil di-parse");
+    if (!ok) printf("  error: %s\n", err);
+    cJSON_Delete(root);
+
+    size_t idx = fbd_graph_find_node(&g, "us1");
+    CHECK(g.nodes[idx].type == FBD_NODE_ULTRASONIC, "us1 bertipe FBD_NODE_ULTRASONIC");
+    CHECK(g.nodes[idx].params.pin == 4, "us1 params.pin (trig) = 4");
+    CHECK(g.nodes[idx].params.ultrasonic_echo_pin == 5, "us1 params.echo_pin = 5");
+    CHECK(g.nodes[idx].params.hw_mode == FBD_HW_REAL, "us1 params.hw_mode = real");
+
+    cJSON *serialized = fbd_json_serialize(&g);
+    char *serialized_str = cJSON_PrintUnformatted(serialized);
+
+    cJSON *root2 = cJSON_Parse(serialized_str);
+    fbd_graph_t g2;
+    bool ok2 = fbd_json_parse(root2, &g2, err, sizeof(err));
+    CHECK(ok2, "hasil serialize ultrasonic bisa di-parse ulang (round-trip)");
+
+    size_t idx2 = fbd_graph_find_node(&g2, "us1");
+    CHECK(g2.nodes[idx2].params.ultrasonic_echo_pin == 5, "round-trip: us1 echo_pin tetap 5");
+
+    free(serialized_str);
+    cJSON_Delete(serialized);
+    cJSON_Delete(root2);
+}
+
+static void test_ultrasonic_same_trig_echo_pin_rejected(void)
+{
+    const char *json =
+    "{ \"version\": 1, \"nodes\": ["
+    "  { \"id\": \"us1\", \"type\": \"ultrasonic\", \"params\": { \"pin\": 4, \"echo_pin\": 4 } }"
+    "], \"links\": [] }";
+    cJSON *root = cJSON_Parse(json);
+    fbd_graph_t g;
+    char err[FBD_JSON_ERR_LEN] = {0};
+    bool ok = fbd_json_parse(root, &g, err, sizeof(err));
+    CHECK(ok == false, "ultrasonic: pin (trig) sama dengan echo_pin ditolak");
+    cJSON_Delete(root);
+}
+
 static void test_osc_roundtrip(void)
 {
     const char *json =
@@ -408,6 +459,8 @@ int main(void)
     test_osc_roundtrip();
     test_ws2812_roundtrip();
     test_ws2812_count_out_of_range_rejected();
+    test_ultrasonic_roundtrip();
+    test_ultrasonic_same_trig_echo_pin_rejected();
     test_hw_mode_default_simulated_when_omitted();
     test_i2c_and_sys_var_roundtrip();
     test_reject_unsafe_pin_when_real();

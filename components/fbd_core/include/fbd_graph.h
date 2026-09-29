@@ -44,6 +44,7 @@ typedef enum {
     FBD_NODE_PWM_OUT,
     FBD_NODE_SERVO,
     FBD_NODE_WS2812,
+    FBD_NODE_ULTRASONIC,
     FBD_NODE_I2C_READ_REG,
     FBD_NODE_I2C_WRITE_REG,
     FBD_NODE_I2C_WRITE_BURST,
@@ -106,6 +107,8 @@ typedef struct {
     uint32_t frequency;                 /* FBD_NODE_PWM_OUT (Hz) */
     uint32_t min_us, max_us;            /* FBD_NODE_SERVO: pulse width di sudut 0/180 derajat */
     int ws2812_count;                   /* FBD_NODE_WS2812: jumlah LED di strip, semua diset warna sama */
+    int ultrasonic_echo_pin;            /* FBD_NODE_ULTRASONIC: pin echo (pin utama "pin" dipakai untuk trig) */
+    float ultrasonic_sim_distance_cm;   /* FBD_NODE_ULTRASONIC mode simulated: jarak (cm) dari UI, tanpa sentuh GPIO */
 
     int i2c_bus;                        /* FBD_NODE_I2C_READ_REG/WRITE_REG: index bus (0) */
     uint8_t i2c_address;                /* alamat 7-bit device I2C */

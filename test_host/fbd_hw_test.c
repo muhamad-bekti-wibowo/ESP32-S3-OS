@@ -160,11 +160,36 @@ static void test_ws2812_simulated(void)
     CHECK(g.nodes[idx].outputs[0].i == 255, "ws2812: R di luar rentang (999) di-clamp ke 255");
 }
 
+/* ultrasonic mode simulated: pakai sim_distance_cm langsung, tidak
+ * menyentuh GPIO/timing sama sekali - outputs[1] (error) harus selalu
+ * false karena mode simulated tidak pernah "gagal ukur". */
+static void test_ultrasonic_simulated(void)
+{
+    fbd_graph_t g;
+    fbd_graph_init(&g);
+
+    fbd_node_t *us = fbd_graph_add_node(&g, "us1", FBD_NODE_ULTRASONIC);
+    us->params.hw_mode = FBD_HW_SIMULATED;
+    us->params.pin = 4;
+    us->params.ultrasonic_echo_pin = 5;
+    us->params.ultrasonic_sim_distance_cm = 42.5f;
+
+    CHECK(fbd_graph_compile(&g), "compile() sukses untuk rangkaian ultrasonic simulated");
+    fbd_graph_execute_cycle(&g, 0);
+
+    size_t idx = fbd_graph_find_node(&g, "us1");
+    CHECK(fbd_to_float(g.nodes[idx].outputs[0]) == 42.5f,
+          "ultrasonic simulated: outputs[0] = sim_distance_cm (42.5), tidak menyentuh GPIO");
+    CHECK(fbd_to_bool(g.nodes[idx].outputs[1]) == false,
+          "ultrasonic simulated: outputs[1] (error) selalu false, mode simulated tidak pernah gagal ukur");
+}
+
 int main(void)
 {
     test_analog_scale_compare_digital_out();
     test_pwm_and_servo_simulated();
     test_ws2812_simulated();
+    test_ultrasonic_simulated();
 
     printf("\n%s (%d gagal)\n", g_fail == 0 ? "SEMUA TEST LOLOS" : "ADA TEST GAGAL", g_fail);
     return g_fail == 0 ? 0 : 1;
