@@ -267,6 +267,18 @@ const NODE_TYPES = {
               options: ['SYS.WIFI_CONNECTED', 'SYS.WIFI_RSSI'], default: 'SYS.WIFI_CONNECTED' },
         ],
     },
+
+    // ---- HTTP endpoint kustom - server KEDUA, port terpisah dari editor ----
+    http_endpoint: {
+        label: 'HTTP Endpoint', inputs: 0, outputs: 0, category: 'system', icon: 'http',
+        help: 'Bikin route HTTP baru (GET) yang membalas file HTML/teks statis - berjalan di SERVER KEDUA, port terpisah dari editor (atur portnya di System > HTTP Endpoints). Path wajib mulai "/" (mis. "/status"). File harus SUDAH di-upload lewat tombol Upload di bawah SEBELUM disambungkan ke sini. PENTING: route baru/berubah BARU AKTIF SETELAH DEVICE REBOOT - server kedua mendaftarkan semua endpoint sekali saat boot, tidak bisa ditambah secara langsung seperti node lain.',
+        fields: [
+            { key: 'path', label: 'Path', type: 'text', default: '/status' },
+            { key: 'file', label: 'File HTML', type: 'file-upload', default: '' },
+            { key: 'content_type', label: 'Content-Type', type: 'select',
+              options: ['text/html', 'text/plain'], default: 'text/html' },
+        ],
+    },
 };
 
 /* Label port input/output per tipe, dipakai sebagai tooltip (atribut

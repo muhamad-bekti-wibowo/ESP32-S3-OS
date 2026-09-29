@@ -406,6 +406,41 @@ representasi string tidak muat di `fbd_value_t` (maks 8 byte). Kalau
 dibutuhkan, akan diekspos lewat endpoint HTTP terpisah, bukan dipaksa
 lewat FBDValue.
 
+### HTTP Endpoint kustom (Level 2)
+
+Bikin route HTTP baru (GET) yang membalas file HTML/teks statis dari
+SPIFFS — berjalan di **server httpd KEDUA**, port terpisah dari server
+editor (port 80). Port diatur lewat tab "System > HTTP Endpoints"
+(disimpan ke NVS). **BUKAN dieksekusi tiap scan cycle** — murni definisi
+statis, dibaca sekali saat boot untuk mendaftarkan route.
+
+| `type` | `params` | Keterangan |
+|---|---|---|
+| `http_endpoint` | `{ "path": "/status", "file": "status.html", "content_type": "text/html" }` | `path`: route, wajib mulai `/`. `file`: nama file (bukan path lengkap) di `/spiffs/endpoints/`, harus sudah di-upload lewat `POST /api/endpoint_file` sebelum node ini divalidasi bisa dipakai. `content_type`: `text/html` atau `text/plain`. Tidak punya input/output. |
+
+**Upload file** (dari web UI, tombol "Upload" di panel Properties node):
+```
+POST /api/endpoint_file?name=status.html
+Content-Type: application/octet-stream
+<isi file HTML/teks>
+```
+Nama file tidak boleh mengandung `/` atau `..` (dicegah path traversal),
+maksimal 64KB per file.
+
+**PENTING — wajib reboot:** `esp_http_server` ESP-IDF tidak mendukung
+pendaftaran route secara dinamis. Menambah/mengubah node `http_endpoint`
+lalu Save **tidak langsung aktif** seperti node lain — server kedua
+membaca ulang daftar route HANYA saat boot, dari `program.json` yang
+tersimpan. Device harus di-reboot manual setelah Save supaya perubahan
+route berlaku.
+
+Contoh — endpoint status sederhana:
+```json
+{ "id": "ep1", "type": "http_endpoint", "params": { "path": "/status", "file": "status.html", "content_type": "text/html" } }
+```
+Setelah reboot, `http://<ip-device>:<port>/status` akan membalas isi
+file `status.html` yang sudah di-upload.
+
 ## Contoh document lengkap (dari plan.md §7.1)
 
 ```json

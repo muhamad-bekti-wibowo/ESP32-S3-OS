@@ -80,6 +80,7 @@ static const char *node_type_to_str(fbd_node_type_t type)
         case FBD_NODE_I2C_WRITE_REG: return "i2c_write_reg";
         case FBD_NODE_I2C_WRITE_BURST: return "i2c_write_burst";
         case FBD_NODE_SYS_VAR_GET:   return "sys_var_get";
+        case FBD_NODE_HTTP_ENDPOINT: return "http_endpoint";
         default:                    return NULL;
     }
 }
@@ -533,6 +534,30 @@ static bool parse_params(const cJSON *params, fbd_node_t *node, char *err, size_
             node->params.sys_var_name[sizeof(node->params.sys_var_name) - 1] = '\0';
             break;
         }
+        case FBD_NODE_HTTP_ENDPOINT: {
+            const cJSON *path = cJSON_GetObjectItem(params, "path");
+            const cJSON *file = cJSON_GetObjectItem(params, "file");
+            if (!cJSON_IsString(path) || !cJSON_IsString(file)) {
+                set_err(err, err_len, "http_endpoint: params.path/file wajib string");
+                return false;
+            }
+            if (path->valuestring[0] != '/') {
+                set_err(err, err_len, "http_endpoint: params.path harus mulai dengan '/'");
+                return false;
+            }
+            if (strlen(file->valuestring) == 0) {
+                set_err(err, err_len, "http_endpoint: params.file tidak boleh kosong");
+                return false;
+            }
+            strncpy(node->params.http_path, path->valuestring, sizeof(node->params.http_path) - 1);
+            node->params.http_path[sizeof(node->params.http_path) - 1] = '\0';
+            strncpy(node->params.http_file, file->valuestring, sizeof(node->params.http_file) - 1);
+            node->params.http_file[sizeof(node->params.http_file) - 1] = '\0';
+            const cJSON *content_type = cJSON_GetObjectItem(params, "content_type");
+            node->params.http_content_type_html =
+                !(content_type && cJSON_IsString(content_type) && strcmp(content_type->valuestring, "text/plain") == 0);
+            break;
+        }
         case FBD_NODE_AND:
         case FBD_NODE_OR:
         case FBD_NODE_NOT:
@@ -801,6 +826,11 @@ static cJSON *serialize_params(const fbd_node_t *node)
         }
         case FBD_NODE_SYS_VAR_GET:
             cJSON_AddStringToObject(params, "name", node->params.sys_var_name);
+            break;
+        case FBD_NODE_HTTP_ENDPOINT:
+            cJSON_AddStringToObject(params, "path", node->params.http_path);
+            cJSON_AddStringToObject(params, "file", node->params.http_file);
+            cJSON_AddStringToObject(params, "content_type", node->params.http_content_type_html ? "text/html" : "text/plain");
             break;
         default:
             break;

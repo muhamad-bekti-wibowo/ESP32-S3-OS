@@ -192,7 +192,63 @@ function fieldInputHtml(field, value) {
          * lihat renderCommandListField() + wireCommandListEvents(). */
         return renderCommandListField(id, field, Array.isArray(value) ? value : []);
     }
+    if (field.type === 'file-upload') {
+        /* http_endpoint.file: nama file ditampilkan sebagai teks (read-only
+         * hasil upload), tombol "Upload" buka file picker tersembunyi lalu
+         * POST ke /api/endpoint_file - lihat wireFileUploadEvents(). */
+        return `<div class="file-upload-row" df-field="${field.key}" df-field-type="file-upload">
+            <input type="text" id="${id}" class="file-upload-name" value="${value || ''}" placeholder="(belum ada file)" readonly>
+            <button type="button" class="file-upload-btn">Upload</button>
+            <input type="file" class="file-upload-input" accept=".html,.htm,.txt" hidden>
+        </div>`;
+    }
     return `<input type="text" id="${id}" df-field="${field.key}" value="${value}">`;
+}
+
+/* Upload file lewat tombol "Upload" di field type=file-upload (dipakai
+ * http_endpoint.file) - POST ke /api/endpoint_file?name=<nama asli file>,
+ * lalu isi nama file itu balik ke params node (df-field="file") supaya
+ * langsung tersambung tanpa user ketik manual. */
+function wireFileUploadEvents(panel) {
+    panel.addEventListener('click', (e) => {
+        if (e.target.classList.contains('file-upload-btn')) {
+            const row = e.target.closest('.file-upload-row');
+            row.querySelector('.file-upload-input').click();
+        }
+    });
+    panel.addEventListener('change', async (e) => {
+        if (!e.target.classList.contains('file-upload-input')) return;
+        const row = e.target.closest('.file-upload-row');
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const nameInput = row.querySelector('.file-upload-name');
+        nameInput.value = 'Mengupload...';
+        try {
+            const res = await fetch(`/api/endpoint_file?name=${encodeURIComponent(file.name)}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/octet-stream' },
+                body: file,
+            });
+            const body = await res.json();
+            if (!res.ok) {
+                nameInput.value = '';
+                setStatus(`Upload gagal: ${body.message || res.statusText}`, true);
+                return;
+            }
+            nameInput.value = file.name;
+            if (selectedDfId !== null) {
+                const fieldKey = row.getAttribute('df-field');
+                const nodeData = editor.getNodeFromId(selectedDfId);
+                nodeData.data.params[fieldKey] = file.name;
+                editor.updateNodeDataFromId(selectedDfId, nodeData.data);
+            }
+            setStatus(`File "${file.name}" ter-upload`);
+        } catch (err) {
+            nameInput.value = '';
+            setStatus(`Upload error: ${err.message}`, true);
+        }
+    });
 }
 
 function renderCommandListField(id, field, commands) {
@@ -412,6 +468,7 @@ function initEditor() {
         editor.updateNodeDataFromId(selectedDfId, nodeData.data);
     });
     wireCommandListEvents(propertiesBody);
+    wireFileUploadEvents(propertiesBody);
 
     document.getElementById('palette-search').addEventListener('input', (e) => {
         filterPalette(e.target.value);

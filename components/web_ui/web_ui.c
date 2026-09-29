@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <dirent.h>
+#include <sys/stat.h>
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_spiffs.h"
@@ -10,6 +11,7 @@
 #include "cJSON.h"
 #include "fbd_json.h"
 #include "wifi_mgr.h"
+#include "endpoint_mgr.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_ota_ops.h"
@@ -518,6 +520,241 @@ static esp_err_t ota_status_get_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+/* ---- Node http_endpoint (lihat schema.md): route HTTP statis di server
+ * httpd KEDUA, port terpisah (endpoint_mgr) dari server utama (editor +
+ * /api/...). File HTML/teks-nya disimpan di /spiffs/endpoints/<file>,
+ * di-upload lewat POST /api/endpoint_file (mirip pola upload OTA).
+ * Server kedua didaftarkan SEKALI saat boot dari graph yang tersimpan -
+ * TIDAK bisa ditambah/dihapus route secara dinamis tanpa reboot (batasan
+ * esp_http_server ESP-IDF), makanya UI System > HTTP Endpoints wajib
+ * kasih peringatan reboot setelah Save program berisi node baru/berubah. ---- */
+
+#define ENDPOINT_FILE_DIR "/spiffs/endpoints"
+#define ENDPOINT_FILE_MAX_SIZE (64 * 1024) /* 64KB cukup longgar utk halaman HTML+CSS sederhana */
+
+/* Handler generik dipakai server KEDUA - membaca file dari /spiffs/endpoints/
+ * sesuai http_file yang di-bind lewat httpd_uri_t.user_ctx (nama file,
+ * bukan path lengkap - dihitung di sini). content_type juga lewat user_ctx
+ * (di-encode di string statis "file|content_type" saat registrasi, lihat
+ * register_http_endpoints()). */
+static esp_err_t endpoint_get_handler(httpd_req_t *req)
+{
+    const char *user_ctx = (const char *)req->user_ctx;
+    char file[32] = {0};
+    char content_type[16] = "text/html";
+    const char *sep = strchr(user_ctx, '|');
+    if (sep) {
+        size_t file_len = (size_t)(sep - user_ctx);
+        if (file_len >= sizeof(file)) file_len = sizeof(file) - 1;
+        memcpy(file, user_ctx, file_len);
+        strncpy(content_type, sep + 1, sizeof(content_type) - 1);
+    } else {
+        strncpy(file, user_ctx, sizeof(file) - 1);
+    }
+
+    char path[80];
+    snprintf(path, sizeof(path), "%s/%s", ENDPOINT_FILE_DIR, file);
+    FILE *f = fopen(path, "r");
+    if (!f) {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "file endpoint tidak ditemukan di SPIFFS");
+        return ESP_FAIL;
+    }
+    httpd_resp_set_type(req, content_type);
+    char buf[512];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
+        httpd_resp_send_chunk(req, buf, n);
+    }
+    httpd_resp_send_chunk(req, NULL, 0);
+    fclose(f);
+    return ESP_OK;
+}
+
+/* ---- POST /api/endpoint_file : upload file HTML/teks lewat browser
+ * (input type=file), disimpan ke /spiffs/endpoints/<nama file dari query
+ * string ?name=...>. Dipakai UI System > HTTP Endpoints sebelum user
+ * menyambungkan nama file itu ke params.file node http_endpoint. ---- */
+
+static esp_err_t endpoint_file_post_handler(httpd_req_t *req)
+{
+    char filename[32] = {0};
+    size_t qs_len = httpd_req_get_url_query_len(req);
+    if (qs_len == 0 || qs_len >= 128) {
+        return send_json_error(req, "query string ?name=<file> wajib diisi");
+    }
+    char qs[128];
+    httpd_req_get_url_query_str(req, qs, sizeof(qs));
+    if (httpd_query_key_value(qs, "name", filename, sizeof(filename)) != ESP_OK || strlen(filename) == 0) {
+        return send_json_error(req, "query string ?name=<file> wajib diisi");
+    }
+    /* Cegah path traversal sederhana - nama file tidak boleh mengandung
+     * '/' (harus nama file polos, bukan path bersarang) atau '..'. */
+    if (strchr(filename, '/') || strstr(filename, "..")) {
+        return send_json_error(req, "nama file tidak valid (tidak boleh mengandung '/' atau '..')");
+    }
+
+    int total = req->content_len;
+    if (total <= 0 || total > ENDPOINT_FILE_MAX_SIZE) {
+        return send_json_error(req, "ukuran file tidak valid (maks 64KB)");
+    }
+
+    mkdir(ENDPOINT_FILE_DIR, 0755); /* aman dipanggil walau folder sudah ada */
+
+    char path[80];
+    snprintf(path, sizeof(path), "%s/%s", ENDPOINT_FILE_DIR, filename);
+    FILE *f = fopen(path, "w");
+    if (!f) {
+        return send_json_error(req, "gagal buat file di SPIFFS");
+    }
+
+    char buf[512];
+    int received = 0;
+    bool write_failed = false;
+    while (received < total) {
+        int to_read = total - received;
+        if (to_read > (int)sizeof(buf)) to_read = sizeof(buf);
+        int r = httpd_req_recv(req, buf, to_read);
+        if (r <= 0) {
+            write_failed = true;
+            break;
+        }
+        fwrite(buf, 1, r, f);
+        received += r;
+    }
+    fclose(f);
+
+    if (write_failed) {
+        remove(path);
+        return send_json_error(req, "gagal menerima file di tengah upload");
+    }
+
+    ESP_LOGI(TAG, "file endpoint tersimpan: %s (%d byte)", path, total);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"ok\"}");
+    return ESP_OK;
+}
+
+/* ---- GET/POST /api/endpoints_config : port server httpd KEDUA
+ * (endpoint_mgr, NVS) - beda dari /api/network (WiFi) tapi pola sama:
+ * simpan ke NVS, baru berlaku setelah reboot. ---- */
+
+static esp_err_t endpoints_config_get_handler(httpd_req_t *req)
+{
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddNumberToObject(root, "port", endpoint_mgr_get_port());
+    char *out = cJSON_PrintUnformatted(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, out);
+    free(out);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+static esp_err_t endpoints_config_post_handler(httpd_req_t *req)
+{
+    int total = req->content_len;
+    if (total <= 0 || total > 128) {
+        return send_json_error(req, "ukuran body tidak valid");
+    }
+    char buf[128];
+    int received = 0;
+    while (received < total) {
+        int r = httpd_req_recv(req, buf + received, total - received);
+        if (r <= 0) {
+            return send_json_error(req, "gagal membaca body");
+        }
+        received += r;
+    }
+    buf[total] = '\0';
+
+    cJSON *json = cJSON_Parse(buf);
+    if (!json) {
+        return send_json_error(req, "JSON tidak valid (parse error)");
+    }
+    const cJSON *port = cJSON_GetObjectItem(json, "port");
+    if (!port || !cJSON_IsNumber(port) || port->valuedouble < 1 || port->valuedouble > 65535) {
+        cJSON_Delete(json);
+        return send_json_error(req, "port harus angka 1-65535");
+    }
+    bool ok = endpoint_mgr_save_port((uint16_t)port->valuedouble);
+    cJSON_Delete(json);
+
+    if (!ok) {
+        return send_json_error(req, "gagal menyimpan port ke NVS");
+    }
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"ok\",\"message\":\"Port tersimpan. Reboot device untuk menerapkan.\"}");
+    return ESP_OK;
+}
+
+/* Daftarkan route HTTP kustom (node http_endpoint) di server httpd KEDUA,
+ * dibaca dari graph aktif SAAT INI (dipanggil sekali setelah
+ * load_program_file_at_startup(), sebelum server kedua di-start).
+ * user_ctx per handler diisi string statis "file|content_type" yang
+ * SENGAJA tidak pernah di-free (hidup selama program berjalan, jumlahnya
+ * dibatasi FBD_MAX_NODES sehingga tidak bisa leak tanpa batas). */
+static void register_http_endpoints(httpd_handle_t server, const fbd_graph_t *graph)
+{
+    for (size_t i = 0; i < graph->node_count; ++i) {
+        const fbd_node_t *node = &graph->nodes[i];
+        if (node->type != FBD_NODE_HTTP_ENDPOINT) continue;
+
+        char *user_ctx = malloc(80);
+        if (!user_ctx) continue;
+        snprintf(user_ctx, 80, "%s|%s", node->params.http_file,
+                 node->params.http_content_type_html ? "text/html" : "text/plain");
+
+        httpd_uri_t *uri = malloc(sizeof(httpd_uri_t));
+        if (!uri) { free(user_ctx); continue; }
+        uri->uri = strdup(node->params.http_path);
+        uri->method = HTTP_GET;
+        uri->handler = endpoint_get_handler;
+        uri->user_ctx = user_ctx;
+
+        if (httpd_register_uri_handler(server, uri) == ESP_OK) {
+            ESP_LOGI(TAG, "http_endpoint terdaftar: GET %s -> %s", node->params.http_path, node->params.http_file);
+        } else {
+            ESP_LOGW(TAG, "gagal daftar http_endpoint: %s (path bentrok/handler penuh?)", node->params.http_path);
+        }
+        /* uri/user_ctx SENGAJA tidak di-free - httpd_uri_t harus tetap
+         * hidup selama server berjalan (esp_http_server tidak copy
+         * struct-nya). Bukan leak tanpa batas karena dibatasi FBD_MAX_NODES
+         * dan cuma terjadi sekali saat boot, tidak berulang. */
+    }
+}
+
+/* Server httpd KEDUA, port dari endpoint_mgr (NVS). Dipanggil sekali saat
+ * boot SETELAH server utama & load_program_file_at_startup() selesai -
+ * membaca graph AKTIF saat itu (yang barusan dimuat dari program.json)
+ * untuk tahu route apa saja yang perlu didaftarkan. */
+static void start_endpoint_server(const fbd_graph_t *graph)
+{
+    uint16_t port = endpoint_mgr_get_port();
+
+    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+    config.server_port = port;
+    /* HTTPD_DEFAULT_CONFIG() set ctrl_port ke konstanta tetap
+     * (ESP_HTTPD_DEF_CTRL_PORT=32768) - kalau dua instance httpd jalan di
+     * proses yang sama (server utama + server kedua ini) dan sama-sama
+     * pakai ctrl_port default, instance kedua GAGAL start (errno 112,
+     * "error in creating ctrl socket") karena ctrl socket internal itu
+     * sendiri bentrok - BUKAN soal server_port (8080) yang dipilih user.
+     * Ditemukan dari log nyata di hardware, bukan dugaan. Server kedua
+     * WAJIB ctrl_port beda dari default supaya bisa jalan berdampingan
+     * dengan server utama. */
+    config.ctrl_port = ESP_HTTPD_DEF_CTRL_PORT + 1;
+    config.max_uri_handlers = 16; /* cukup untuk FBD_MAX_NODES/4 endpoint realistis */
+
+    httpd_handle_t server = NULL;
+    if (httpd_start(&server, &config) != ESP_OK) {
+        ESP_LOGE(TAG, "gagal start httpd endpoint server di port %u", port);
+        return;
+    }
+
+    register_http_endpoints(server, graph);
+    ESP_LOGI(TAG, "http endpoint server siap di port %u", port);
+}
+
 static void mount_spiffs(void)
 {
     esp_vfs_spiffs_conf_t conf = {
@@ -597,7 +834,7 @@ void web_ui_start(logic_program_t *legacy_prog,
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.uri_match_fn = httpd_uri_match_wildcard;
-    config.max_uri_handlers = 12;
+    config.max_uri_handlers = 16;
     /* Default 4096 terlalu kecil untuk program_post_handler/program_get_handler
      * yang memanggil cJSON print/parse rekursif atas dokumen berisi puluhan
      * node - pernah menyebabkan stack overflow yang merusak heap TLSF secara
@@ -617,6 +854,9 @@ void web_ui_start(logic_program_t *legacy_prog,
     httpd_uri_t network_post_uri = { .uri = "/api/network", .method = HTTP_POST, .handler = network_post_handler };
     httpd_uri_t ota_post_uri = { .uri = "/api/ota", .method = HTTP_POST, .handler = ota_post_handler };
     httpd_uri_t ota_status_uri = { .uri = "/api/ota/status", .method = HTTP_GET, .handler = ota_status_get_handler };
+    httpd_uri_t endpoint_file_post_uri = { .uri = "/api/endpoint_file", .method = HTTP_POST, .handler = endpoint_file_post_handler };
+    httpd_uri_t endpoints_config_get_uri = { .uri = "/api/endpoints_config", .method = HTTP_GET, .handler = endpoints_config_get_handler };
+    httpd_uri_t endpoints_config_post_uri = { .uri = "/api/endpoints_config", .method = HTTP_POST, .handler = endpoints_config_post_handler };
     /* Wildcard, harus didaftarkan setelah /api/... supaya tidak menutupi -
      * httpd_uri_match_wildcard cocokkan URI paling spesifik dulu terlepas
      * urutan register, tapi tetap didaftarkan terakhir untuk kejelasan. */
@@ -629,7 +869,27 @@ void web_ui_start(logic_program_t *legacy_prog,
     httpd_register_uri_handler(server, &network_post_uri);
     httpd_register_uri_handler(server, &ota_post_uri);
     httpd_register_uri_handler(server, &ota_status_uri);
+    httpd_register_uri_handler(server, &endpoint_file_post_uri);
+    httpd_register_uri_handler(server, &endpoints_config_get_uri);
+    httpd_register_uri_handler(server, &endpoints_config_post_uri);
     httpd_register_uri_handler(server, &static_uri);
 
     ESP_LOGI(TAG, "web server siap");
+
+    /* Server httpd KEDUA (port terpisah, node http_endpoint) - dibaca dari
+     * *STANDBY* graph, BUKAN *active_graph_ptr. Titik ini (dalam
+     * web_ui_start(), dipanggil dari app_main() SEBELUM fbd_scan_task
+     * dibuat - lihat main.c) terjadi SEBELUM scan task pernah sempat
+     * jalan sama sekali, jadi swap active<->standby belum pernah terjadi:
+     * *active_graph_ptr masih graph default kosong dari main.c, sedangkan
+     * program.json yang BARU SAJA dimuat oleh load_program_file_at_startup()
+     * (dipanggil beberapa baris di atas) ada di *standby_graph_ptr,
+     * menunggu di-swap oleh scan task nanti. Baris ini SETELAH server
+     * utama start supaya kalau start server kedua gagal (mis. port
+     * dipakai proses lain), server utama tetap jalan normal - user masih
+     * bisa akses editor untuk perbaiki config port lewat System > HTTP
+     * Endpoints. Ditemukan dari log nyata di hardware (endpoint tidak
+     * pernah terdaftar walau program.json 1 node berhasil dimuat), bukan
+     * dugaan. */
+    start_endpoint_server(*s_standby_graph_ptr);
 }

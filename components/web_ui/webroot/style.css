@@ -399,6 +399,44 @@ h3 {
     border-style: solid;
 }
 
+/* ---- file-upload (http_endpoint.file) ---- */
+
+.file-upload-row {
+    display: flex;
+    gap: 6px;
+}
+
+.file-upload-name {
+    flex: 1;
+    min-width: 0;
+    box-sizing: border-box;
+    font-family: inherit;
+    font-size: 12px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+    color: var(--text-muted);
+}
+
+.file-upload-btn {
+    flex-shrink: 0;
+    padding: 8px 12px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border: 1px solid var(--accent-border);
+    border-radius: var(--radius-sm);
+}
+
+.file-upload-btn:hover {
+    background: var(--accent);
+    color: #fff;
+}
+
 /* ---- Toolbar ---- */
 
 #toolbar {

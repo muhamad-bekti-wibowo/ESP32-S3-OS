@@ -244,6 +244,57 @@ static void test_ultrasonic_same_trig_echo_pin_rejected(void)
     cJSON_Delete(root);
 }
 
+static void test_http_endpoint_roundtrip(void)
+{
+    const char *json =
+    "{ \"version\": 1, \"nodes\": ["
+    "  { \"id\": \"ep1\", \"type\": \"http_endpoint\", \"params\": { \"path\": \"/status\", \"file\": \"status.html\", \"content_type\": \"text/html\" } }"
+    "], \"links\": [] }";
+
+    cJSON *root = cJSON_Parse(json);
+    fbd_graph_t g;
+    char err[FBD_JSON_ERR_LEN] = {0};
+    bool ok = fbd_json_parse(root, &g, err, sizeof(err));
+    CHECK(ok, "http_endpoint berhasil di-parse");
+    if (!ok) printf("  error: %s\n", err);
+    cJSON_Delete(root);
+
+    size_t idx = fbd_graph_find_node(&g, "ep1");
+    CHECK(g.nodes[idx].type == FBD_NODE_HTTP_ENDPOINT, "ep1 bertipe FBD_NODE_HTTP_ENDPOINT");
+    CHECK(strcmp(g.nodes[idx].params.http_path, "/status") == 0, "ep1 params.path = /status");
+    CHECK(strcmp(g.nodes[idx].params.http_file, "status.html") == 0, "ep1 params.file = status.html");
+    CHECK(g.nodes[idx].params.http_content_type_html == true, "ep1 params.content_type = text/html");
+
+    cJSON *serialized = fbd_json_serialize(&g);
+    char *serialized_str = cJSON_PrintUnformatted(serialized);
+
+    cJSON *root2 = cJSON_Parse(serialized_str);
+    fbd_graph_t g2;
+    bool ok2 = fbd_json_parse(root2, &g2, err, sizeof(err));
+    CHECK(ok2, "hasil serialize http_endpoint bisa di-parse ulang (round-trip)");
+
+    size_t idx2 = fbd_graph_find_node(&g2, "ep1");
+    CHECK(strcmp(g2.nodes[idx2].params.http_path, "/status") == 0, "round-trip: ep1 path tetap /status");
+
+    free(serialized_str);
+    cJSON_Delete(serialized);
+    cJSON_Delete(root2);
+}
+
+static void test_http_endpoint_path_must_start_with_slash(void)
+{
+    const char *json =
+    "{ \"version\": 1, \"nodes\": ["
+    "  { \"id\": \"ep1\", \"type\": \"http_endpoint\", \"params\": { \"path\": \"status\", \"file\": \"status.html\" } }"
+    "], \"links\": [] }";
+    cJSON *root = cJSON_Parse(json);
+    fbd_graph_t g;
+    char err[FBD_JSON_ERR_LEN] = {0};
+    bool ok = fbd_json_parse(root, &g, err, sizeof(err));
+    CHECK(ok == false, "http_endpoint: params.path tanpa '/' di depan ditolak");
+    cJSON_Delete(root);
+}
+
 static void test_osc_roundtrip(void)
 {
     const char *json =
@@ -461,6 +512,8 @@ int main(void)
     test_ws2812_count_out_of_range_rejected();
     test_ultrasonic_roundtrip();
     test_ultrasonic_same_trig_echo_pin_rejected();
+    test_http_endpoint_roundtrip();
+    test_http_endpoint_path_must_start_with_slash();
     test_hw_mode_default_simulated_when_omitted();
     test_i2c_and_sys_var_roundtrip();
     test_reject_unsafe_pin_when_real();

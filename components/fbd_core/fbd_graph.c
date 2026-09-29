@@ -314,6 +314,12 @@ static fbd_value_t evaluate_node(fbd_node_t *node, fbd_var_store_t *vars, uint32
         }
         case FBD_NODE_SYS_VAR_GET:
             return fbd_sys_vars_get(node->params.sys_var_name);
+        case FBD_NODE_HTTP_ENDPOINT:
+            /* Murni definisi statis (path/file/content_type) - route
+             * HTTP-nya didaftarkan SEKALI saat boot oleh web_ui.c, bukan
+             * dieksekusi tiap scan cycle. Node ini tidak punya input/
+             * output yang berarti apa pun, jadi cukup no-op di sini. */
+            return fbd_make_empty();
         default:
             return fbd_make_empty();
     }

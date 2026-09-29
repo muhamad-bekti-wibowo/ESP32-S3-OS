@@ -49,6 +49,7 @@ typedef enum {
     FBD_NODE_I2C_WRITE_REG,
     FBD_NODE_I2C_WRITE_BURST,
     FBD_NODE_SYS_VAR_GET,
+    FBD_NODE_HTTP_ENDPOINT,
     FBD_NODE_TYPE_COUNT
 } fbd_node_type_t;
 
@@ -121,6 +122,14 @@ typedef struct {
     uint32_t i2c_burst_delay_us;         /* delay antar command (mis. untuk toggle bit E LCD), 0 = tanpa delay */
 
     char sys_var_name[24];              /* FBD_NODE_SYS_VAR_GET: "SYS.WIFI_CONNECTED" dkk */
+
+    /* FBD_NODE_HTTP_ENDPOINT: definisi route HTTP statis di server httpd
+     * KEDUA (port terpisah dari editor, lihat endpoint_mgr.h) - TIDAK
+     * dieksekusi tiap scan cycle (murni data konfigurasi dibaca sekali
+     * saat boot oleh web_ui.c untuk register handler). */
+    char http_path[32];                 /* route, wajib mulai "/" (mis. "/status") */
+    char http_file[32];                 /* nama file HTML di /spiffs/endpoints/, mis. "status.html" */
+    bool http_content_type_html;        /* true="text/html", false="text/plain" */
 } fbd_node_params_t;
 
 typedef struct {

@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<title>System &gt; HTTP Endpoints</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="network-page">
+
+<div class="network-card">
+  <h3>System &gt; HTTP Endpoints</h3>
+
+  <div class="properties-help">
+    Node "HTTP Endpoint" di editor membuat route HTTP baru yang berjalan di
+    SERVER KEDUA ini, port terpisah dari editor. Atur port-nya di bawah,
+    lalu buka <code>http://&lt;ip-device&gt;:&lt;port&gt;/&lt;path&gt;</code>
+    sesuai node yang sudah kamu buat. <strong>Route baru/berubah baru aktif
+    setelah device reboot</strong> - server kedua mendaftarkan semua
+    endpoint sekali saat boot.
+  </div>
+
+  <div id="endpoints-status" class="properties-field">
+    <label>Port saat ini (tersimpan)</label>
+    <p id="endpoints-status-text" class="properties-empty">Memuat...</p>
+  </div>
+
+  <div class="properties-field">
+    <label for="ep-port">Port server HTTP Endpoints</label>
+    <input type="number" id="ep-port" min="1" max="65535" placeholder="8080">
+  </div>
+
+  <button onclick="saveEndpointsConfig()">Save Port</button>
+  <a href="/" class="network-back-link">&larr; Kembali ke editor</a>
+  <a href="/network.html" class="network-back-link">System &gt; Network &rarr;</a>
+  <p id="endpoints-save-status" class="properties-empty"></p>
+</div>
+
+<script>
+async function loadEndpointsStatus() {
+    try {
+        const res = await fetch('/api/endpoints_config');
+        const data = await res.json();
+        document.getElementById('endpoints-status-text').textContent = `Port ${data.port}`;
+        document.getElementById('ep-port').value = data.port;
+    } catch (err) {
+        document.getElementById('endpoints-status-text').textContent = 'Gagal memuat status: ' + err.message;
+    }
+}
+
+async function saveEndpointsConfig() {
+    const port = parseInt(document.getElementById('ep-port').value, 10);
+    const statusEl = document.getElementById('endpoints-save-status');
+
+    if (!port || port < 1 || port > 65535) {
+        statusEl.textContent = 'Port harus angka 1-65535';
+        statusEl.style.color = '#c00';
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/endpoints_config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ port }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            statusEl.textContent = 'Gagal: ' + (data.message || res.statusText);
+            statusEl.style.color = '#c00';
+            return;
+        }
+        statusEl.textContent = data.message;
+        statusEl.style.color = '#080';
+    } catch (err) {
+        statusEl.textContent = 'Error: ' + err.message;
+        statusEl.style.color = '#c00';
+    }
+}
+
+loadEndpointsStatus();
+</script>
+</body>
+</html>
