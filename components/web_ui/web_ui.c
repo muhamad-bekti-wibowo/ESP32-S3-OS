@@ -729,6 +729,27 @@ static void register_http_endpoints(httpd_handle_t server, const fbd_graph_t *gr
  * untuk tahu route apa saja yang perlu didaftarkan. */
 static void start_endpoint_server(const fbd_graph_t *graph)
 {
+    /* Server kedua HANYA dijalankan kalau memang ada minimal 1 node
+     * http_endpoint di graph - task httpd tambahan (+ stack + socket
+     * LWIP) tidak gratis, jangan dibebankan ke device yang sama sekali
+     * tidak pakai fitur ini. Ditambahkan setelah user melaporkan editor
+     * jadi blank (ERR_CONNECTION_RESET di node-types.js/app.js) pada
+     * device yang BELUM pernah setting node http_endpoint apa pun -
+     * indikasi server kedua yang SELALU start tanpa syarat menekan
+     * resource server utama sampai request static file gagal di
+     * tengah jalan. */
+    bool has_endpoint_node = false;
+    for (size_t i = 0; i < graph->node_count; ++i) {
+        if (graph->nodes[i].type == FBD_NODE_HTTP_ENDPOINT) {
+            has_endpoint_node = true;
+            break;
+        }
+    }
+    if (!has_endpoint_node) {
+        ESP_LOGI(TAG, "tidak ada node http_endpoint, server kedua tidak dijalankan");
+        return;
+    }
+
     uint16_t port = endpoint_mgr_get_port();
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
