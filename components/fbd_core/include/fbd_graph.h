@@ -123,13 +123,18 @@ typedef struct {
 
     char sys_var_name[24];              /* FBD_NODE_SYS_VAR_GET: "SYS.WIFI_CONNECTED" dkk */
 
-    /* FBD_NODE_HTTP_ENDPOINT: definisi route HTTP statis di server httpd
-     * KEDUA (port terpisah dari editor, lihat endpoint_mgr.h) - TIDAK
-     * dieksekusi tiap scan cycle (murni data konfigurasi dibaca sekali
-     * saat boot oleh web_ui.c untuk register handler). */
+    /* FBD_NODE_HTTP_ENDPOINT: route HTTP di server httpd KEDUA (port
+     * terpisah dari editor, lihat endpoint_mgr.h). path/file/content_type
+     * dibaca sekali saat boot untuk register handler (BUTUH REBOOT kalau
+     * berubah - esp_http_server tidak dukung route dinamis). query_a_name/
+     * query_b_name DAN input/output port DIEKSEKUSI tiap scan cycle
+     * seperti node biasa (lihat http_endpoint_bridge.h untuk kenapa state
+     * runtime-nya TERPISAH dari fbd_node_state_t). */
     char http_path[32];                 /* route, wajib mulai "/" (mis. "/status") */
-    char http_file[32];                 /* nama file HTML di /spiffs/endpoints/, mis. "status.html" */
-    bool http_content_type_html;        /* true="text/html", false="text/plain" */
+    char http_file[32];                 /* nama file HTML fallback di /spiffs/endpoints/ - dipakai HANYA kalah inputs[0] tidak tersambung */
+    bool http_content_type_html;        /* true="text/html", false="text/plain" - berlaku utk file statis MAUPUN response dinamis dari inputs[0] */
+    char http_query_a_name[16];          /* nama query string utk outputs[0], mis. "a" (kosong = outputs[0] selalu 0) */
+    char http_query_b_name[16];          /* nama query string utk outputs[1], mis. "b" */
 } fbd_node_params_t;
 
 typedef struct {

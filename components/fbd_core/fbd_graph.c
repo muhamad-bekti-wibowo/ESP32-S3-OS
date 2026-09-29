@@ -2,6 +2,7 @@
 #include "fbd_hw_backend.h"
 #include "i2c_bridge.h"
 #include "fbd_sys_vars.h"
+#include "http_endpoint_bridge.h"
 #include <string.h>
 
 void fbd_graph_init(fbd_graph_t *g)
@@ -55,12 +56,32 @@ bool fbd_graph_add_link(fbd_graph_t *g, const char *from_id, uint8_t from_port,
     return true;
 }
 
-bool fbd_graph_compile(fbd_graph_t *g)
+/* Link ke input0 node http_endpoint TIDAK dianggap dependency edge sinkron
+ * saat cycle-detection: nilainya dibaca/ditulis lewat http_endpoint_bridge
+ * (state terpisah dari outputs[] node, lihat http_endpoint_bridge.h), jadi
+ * feedback "http_endpoint -> node lain -> balik ke input http_endpoint"
+ * (pola "endpoint jadi kalkulator") bukan cycle algebraic yang perlu
+ * urutan sinkron - boleh dilewatkan topological sort. */
+static bool link_is_http_endpoint_response_edge(const fbd_graph_t *g, const fbd_link_t *link)
+{
+    return g->nodes[link->to_idx].type == FBD_NODE_HTTP_ENDPOINT && link->to_port == 0;
+}
+
+/* Kahn's algorithm biasa. skip_http_endpoint_response=true membuang edge
+ * ke input0 http_endpoint dari graph dependency (dipakai sebagai retry
+ * kalau sort normal gagal karena cycle - lihat fbd_graph_compile()),
+ * supaya link non-feedback biasa (mis. Const -> http_endpoint.input0
+ * tanpa loop balik) tetap dapat urutan sinkron yang benar seperti node
+ * lain. */
+static bool topo_sort(fbd_graph_t *g, bool skip_http_endpoint_response)
 {
     size_t n = g->node_count;
     int in_degree[FBD_MAX_NODES] = {0};
 
     for (size_t i = 0; i < g->link_count; ++i) {
+        if (skip_http_endpoint_response && link_is_http_endpoint_response_edge(g, &g->links[i])) {
+            continue;
+        }
         in_degree[g->links[i].to_idx]++;
     }
 
@@ -79,7 +100,8 @@ bool fbd_graph_compile(fbd_graph_t *g)
         g->execution_order[g->order_count++] = u;
 
         for (size_t i = 0; i < g->link_count; ++i) {
-            if (g->links[i].from_idx == u) {
+            if (g->links[i].from_idx == u &&
+                !(skip_http_endpoint_response && link_is_http_endpoint_response_edge(g, &g->links[i]))) {
                 size_t v = g->links[i].to_idx;
                 if (--in_degree[v] == 0) {
                     queue[q_tail++] = v;
@@ -89,6 +111,17 @@ bool fbd_graph_compile(fbd_graph_t *g)
     }
 
     return g->order_count == n;
+}
+
+bool fbd_graph_compile(fbd_graph_t *g)
+{
+    if (topo_sort(g, false)) {
+        return true;
+    }
+    /* Sort normal gagal (ada cycle) - coba lagi dengan feedback
+     * http_endpoint dikecualikan, sebelum benar-benar menolak sebagai
+     * cyclic. */
+    return topo_sort(g, true);
 }
 
 /* out_secondary diisi untuk node yang punya 2 output (saat ini hanya
@@ -314,12 +347,36 @@ static fbd_value_t evaluate_node(fbd_node_t *node, fbd_var_store_t *vars, uint32
         }
         case FBD_NODE_SYS_VAR_GET:
             return fbd_sys_vars_get(node->params.sys_var_name);
-        case FBD_NODE_HTTP_ENDPOINT:
-            /* Murni definisi statis (path/file/content_type) - route
-             * HTTP-nya didaftarkan SEKALI saat boot oleh web_ui.c, bukan
-             * dieksekusi tiap scan cycle. Node ini tidak punya input/
-             * output yang berarti apa pun, jadi cukup no-op di sini. */
-            return fbd_make_empty();
+        case FBD_NODE_HTTP_ENDPOINT: {
+            /* path/file/content_type tetap statis (route didaftarkan
+             * sekali saat boot), TAPI query_a/query_b (outputs) dan
+             * response dinamis (inputs[0]) DIEKSEKUSI tiap scan cycle -
+             * lihat http_endpoint_bridge.h untuk kenapa datanya lewat
+             * bridge terpisah (bukan langsung baca/tulis state node),
+             * supaya aman terhadap dual-buffer graph swap.
+             *
+             * outputs[0]/outputs[1] = nilai query string TERBARU yang
+             * ditulis task httpd server kedua (0 kalau nama query kosong
+             * di params atau belum pernah ada request).
+             * inputs[0] (kalau tersambung) = nilai response yang akan
+             * dikembalikan endpoint_get_handler dinamis, ditulis balik
+             * ke bridge supaya task httpd bisa membacanya. */
+            float query_a = 0.0f, query_b = 0.0f;
+            if (node->params.http_query_a_name[0] != '\0' || node->params.http_query_b_name[0] != '\0') {
+                http_endpoint_bridge_get_query(node->params.http_path, &query_a, &query_b);
+            }
+            *out_secondary = fbd_make_float(query_b);
+
+            /* inputs[0] FBD_EMPTY = tidak ada wire tersambung ke port
+             * response - endpoint_get_handler tahu ini lewat has_response
+             * dan fallback ke file statis, TIDAK menulis nilai basi. */
+            if (in[0].type != FBD_EMPTY) {
+                http_endpoint_bridge_set_response(node->params.http_path, fbd_to_float(in[0]), true);
+            } else {
+                http_endpoint_bridge_set_response(node->params.http_path, 0.0f, false);
+            }
+            return fbd_make_float(query_a);
+        }
         default:
             return fbd_make_empty();
     }

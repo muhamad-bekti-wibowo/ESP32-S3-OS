@@ -43,6 +43,7 @@ $graphDeps = @(
     "components\fbd_core\fbd_hw_sim.c"
     "components\fbd_core\i2c_bridge_stub.c"
     "components\fbd_core\fbd_sys_vars.c"
+    "components\fbd_core\http_endpoint_bridge_stub.c"
 )
 
 Run-HostTest "fbd_graph_test" (@("test_host\fbd_graph_test.c") + $graphDeps) @("components\fbd_core\include")

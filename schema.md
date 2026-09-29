@@ -409,14 +409,38 @@ lewat FBDValue.
 ### HTTP Endpoint kustom (Level 2)
 
 Bikin route HTTP baru (GET) yang membalas file HTML/teks statis dari
-SPIFFS — berjalan di **server httpd KEDUA**, port terpisah dari server
-editor (port 80). Port diatur lewat tab "System > HTTP Endpoints"
-(disimpan ke NVS). **BUKAN dieksekusi tiap scan cycle** — murni definisi
-statis, dibaca sekali saat boot untuk mendaftarkan route.
+SPIFFS, ATAU nilai dinamis dari graph lain — berjalan di **server httpd
+KEDUA**, port terpisah dari server editor (port 80). Port diatur lewat
+tab "System > HTTP Endpoints" (disimpan ke NVS). Route (path) sendiri
+**BUKAN dieksekusi tiap scan cycle** — murni definisi statis, dibaca
+sekali saat boot untuk mendaftarkan route. Tapi node ini **PUNYA 1 input
+dan 2 output** yang tetap dievaluasi tiap scan cycle seperti node biasa,
+lewat sebuah "bridge" state terpisah (`http_endpoint_bridge`, key by
+path string, bukan pointer node — supaya tetap valid walau graph
+di-swap/di-save ulang).
 
 | `type` | `params` | Keterangan |
 |---|---|---|
-| `http_endpoint` | `{ "path": "/status", "file": "status.html", "content_type": "text/html" }` | `path`: route, wajib mulai `/`. `file`: nama file (bukan path lengkap) di `/spiffs/endpoints/`, harus sudah di-upload lewat `POST /api/endpoint_file` sebelum node ini divalidasi bisa dipakai. `content_type`: `text/html` atau `text/plain`. Tidak punya input/output. |
+| `http_endpoint` | `{ "path": "/add", "query_a_name": "a", "query_b_name": "b", "file": "status.html", "content_type": "text/html" }` | `path`: route, wajib mulai `/`. `query_a_name`/`query_b_name`: nama query string HTTP yang dipetakan ke output 1/2 (kosong = output selalu 0). `file`: nama file fallback (bukan path lengkap) di `/spiffs/endpoints/`, dipakai HANYA kalau input node ini TIDAK tersambung. `content_type`: `text/html` atau `text/plain` — berlaku untuk file statis MAUPUN response dinamis dari input. |
+
+**Port bidirectional (1 input, 2 output):**
+- **Output 1/2** = nilai query string dari request HTTP terakhir yang
+  masuk ke route ini (mis. akses `/add?a=3&b=4` dengan
+  `query_a_name="a"`, `query_b_name="b"` → output1=3, output2=4).
+  Bisa disambung ke node lain seperti Math, Scale, dst.
+- **Input** = kalau disambung ke node lain (mis. hasil Math ADD), nilai
+  itu jadi **response HTTP dinamis** endpoint ini (dikirim sebagai teks,
+  bukan lagi file statis). Kalau input TIDAK disambung, endpoint balik
+  ke perilaku lama: serve file statis dari `file`.
+- Request HTTP menunggu maks ~80ms (4× scan cycle) untuk memastikan
+  response yang dikirim adalah hasil PALING BARU: butuh 2 scan cycle
+  penuh supaya nilai dari node hilir (mis. Math) sempat terdorong balik
+  ke input endpoint sebelum dibaca (1 cycle endpoint proses query, 1
+  cycle lagi node hilir proses & push balik).
+- Kombinasi umum — "endpoint jadi kalkulator": sambungkan output 1/2 ke
+  Math, lalu sambungkan balik output Math ke input node
+  `http_endpoint` yang sama (atau node `http_endpoint` kedua dengan path
+  berbeda). Lihat contoh di bawah.
 
 **Upload file** (dari web UI, tombol "Upload" di panel Properties node):
 ```
@@ -434,12 +458,30 @@ membaca ulang daftar route HANYA saat boot, dari `program.json` yang
 tersimpan. Device harus di-reboot manual setelah Save supaya perubahan
 route berlaku.
 
-Contoh — endpoint status sederhana:
+Contoh — endpoint status statis:
 ```json
 { "id": "ep1", "type": "http_endpoint", "params": { "path": "/status", "file": "status.html", "content_type": "text/html" } }
 ```
 Setelah reboot, `http://<ip-device>:<port>/status` akan membalas isi
 file `status.html` yang sudah di-upload.
+
+Contoh — endpoint kalkulator dinamis (`/add?a=3&b=4` → balas `"7"`):
+```json
+{
+  "nodes": [
+    { "id": "ep1", "type": "http_endpoint",
+      "params": { "path": "/add", "query_a_name": "a", "query_b_name": "b" } },
+    { "id": "sum1", "type": "math", "params": { "op": "add" } }
+  ],
+  "links": [
+    { "from": { "node": "ep1", "port": 0 }, "to": { "node": "sum1", "port": 0 } },
+    { "from": { "node": "ep1", "port": 1 }, "to": { "node": "sum1", "port": 1 } },
+    { "from": { "node": "sum1", "port": 0 }, "to": { "node": "ep1", "port": 0 } }
+  ]
+}
+```
+Setelah reboot, akses `http://<ip-device>:<port>/add?a=3&b=4` akan
+membalas `7` (dihitung live tiap request, lewat scan cycle terkini).
 
 ## Contoh document lengkap (dari plan.md §7.1)
 

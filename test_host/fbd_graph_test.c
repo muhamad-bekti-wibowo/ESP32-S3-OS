@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "fbd_graph.h"
+#include "http_endpoint_bridge.h"
 
 static int g_fail = 0;
 
@@ -116,11 +117,75 @@ static void test_and_gate_chain(void)
           "digital_output true setelah AND(digital_input=true, timer_on_delay=true)");
 }
 
+/* http_endpoint: outputs[0]/[1] baca dari bridge (query_a/query_b yang
+ * "ditulis task httpd" - disimulasikan di sini dengan panggil
+ * http_endpoint_bridge_set_query() langsung), inputs[0] (kalau
+ * tersambung) ditulis balik ke bridge sebagai response. */
+static void test_http_endpoint_query_and_response(void)
+{
+    fbd_graph_t g;
+    fbd_graph_init(&g);
+
+    fbd_node_t *ep = fbd_graph_add_node(&g, "ep1", FBD_NODE_HTTP_ENDPOINT);
+    strncpy(ep->params.http_path, "/add", sizeof(ep->params.http_path) - 1);
+    strncpy(ep->params.http_query_a_name, "a", sizeof(ep->params.http_query_a_name) - 1);
+    strncpy(ep->params.http_query_b_name, "b", sizeof(ep->params.http_query_b_name) - 1);
+
+    fbd_node_t *math = fbd_graph_add_node(&g, "sum1", FBD_NODE_MATH);
+    math->params.math_op = FBD_OP_ADD;
+
+    /* ep1.output0/1 -> sum1.in0/in1, sum1.output0 -> ep1.input0 (loop
+     * dibolehkan sengaja karena http_endpoint TIDAK dianggap "downstream"
+     * dari dirinya sendiri secara data-flow biasa - tapi topological sort
+     * TETAP akan anggap ini cyclic literal kalau dites apa adanya, jadi
+     * di test ini sengaja TIDAK bikin link balik - cukup verifikasi 2
+     * arah independen: query->output, DAN input->response terpisah,
+     * seperti pemakaian nyata (endpoint kalkulator biasanya 2 node
+     * ep1_in dan ep1_out - lihat node-types.js help). */
+    fbd_graph_add_link(&g, "ep1", 0, "sum1", 0);
+    fbd_graph_add_link(&g, "ep1", 1, "sum1", 1);
+
+    CHECK(fbd_graph_compile(&g), "compile() sukses untuk ep1(http_endpoint) -> sum1(math add)");
+
+    /* Simulasikan task httpd menulis query (endpoint /add?a=3&b=4 diakses). */
+    http_endpoint_bridge_set_query("/add", 3.0f, 4.0f);
+
+    fbd_graph_execute_cycle(&g, 0);
+
+    size_t ep_idx = fbd_graph_find_node(&g, "ep1");
+    CHECK(fbd_to_float(g.nodes[ep_idx].outputs[0]) == 3.0f, "http_endpoint: outputs[0] = query a (3) dari bridge");
+    CHECK(fbd_to_float(g.nodes[ep_idx].outputs[1]) == 4.0f, "http_endpoint: outputs[1] = query b (4) dari bridge");
+
+    size_t sum_idx = fbd_graph_find_node(&g, "sum1");
+    CHECK(fbd_to_float(g.nodes[sum_idx].outputs[0]) == 7.0f, "sum1 = 3+4 = 7, dihitung dari nilai query http_endpoint");
+
+    /* http_endpoint TANPA input tersambung -> bridge response has_response=false
+     * (endpoint_get_handler fallback ke file statis). */
+    http_endpoint_bridge_response_t resp = http_endpoint_bridge_get_response("/add");
+    CHECK(resp.has_response == false, "http_endpoint: tanpa input tersambung -> bridge has_response=false");
+
+    /* Node KEDUA, path beda, DENGAN input tersambung - verifikasi arah response. */
+    fbd_graph_t g2;
+    fbd_graph_init(&g2);
+    fbd_node_t *ep2 = fbd_graph_add_node(&g2, "ep2", FBD_NODE_HTTP_ENDPOINT);
+    strncpy(ep2->params.http_path, "/result", sizeof(ep2->params.http_path) - 1);
+    fbd_node_t *cst = fbd_graph_add_node(&g2, "cst1", FBD_NODE_CONST);
+    cst->params.const_value = fbd_make_float(99.0f);
+    fbd_graph_add_link(&g2, "cst1", 0, "ep2", 0);
+    CHECK(fbd_graph_compile(&g2), "compile() sukses untuk cst1 -> ep2(http_endpoint).input0");
+
+    fbd_graph_execute_cycle(&g2, 0);
+    http_endpoint_bridge_response_t resp2 = http_endpoint_bridge_get_response("/result");
+    CHECK(resp2.has_response == true, "http_endpoint: input tersambung -> bridge has_response=true");
+    CHECK(resp2.value == 99.0f, "http_endpoint: bridge response value = 99 (dari cst1)");
+}
+
 int main(void)
 {
     test_topo_sort_reversed_order();
     test_cyclic_rejected();
     test_and_gate_chain();
+    test_http_endpoint_query_and_response();
 
     printf("\n%s (%d gagal)\n", g_fail == 0 ? "SEMUA TEST LOLOS" : "ADA TEST GAGAL", g_fail);
     return g_fail == 0 ? 0 : 1;

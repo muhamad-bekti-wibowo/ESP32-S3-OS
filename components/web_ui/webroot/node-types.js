@@ -270,11 +270,13 @@ const NODE_TYPES = {
 
     // ---- HTTP endpoint kustom - server KEDUA, port terpisah dari editor ----
     http_endpoint: {
-        label: 'HTTP Endpoint', inputs: 0, outputs: 0, category: 'system', icon: 'http',
-        help: 'Bikin route HTTP baru (GET) yang membalas file HTML/teks statis - berjalan di SERVER KEDUA, port terpisah dari editor (atur portnya di System > HTTP Endpoints). Path wajib mulai "/" (mis. "/status"). File harus SUDAH di-upload lewat tombol Upload di bawah SEBELUM disambungkan ke sini. PENTING: route baru/berubah BARU AKTIF SETELAH DEVICE REBOOT - server kedua mendaftarkan semua endpoint sekali saat boot, tidak bisa ditambah secara langsung seperti node lain.',
+        label: 'HTTP Endpoint', inputs: 1, outputs: 2, category: 'system', icon: 'http',
+        help: 'Bikin route HTTP baru (GET) di SERVER KEDUA, port terpisah dari editor (atur portnya di System > HTTP Endpoints). Path wajib mulai "/" (mis. "/add"). BISA disambung ke node lain, DUA ARAH: (1) Output 1/2 = nilai query string request (mis. panggil /add?a=1&b=2, isi nama query di field Query A/B Name, sambungkan output ke Math dst). (2) Input = nilai yang dikembalikan sebagai response endpoint (dari hasil node lain, mis. Math) - kalau TIDAK disambung, endpoint pakai File statis seperti biasa. Kombinasi umum: sambungkan output ke Math, lalu output Math balik ke input node ini - endpoint jadi kalkulator lewat URL. Request menunggu maks ~80ms (4x scan cycle) supaya dapat hasil TERBARU dari node hilir seperti Math. PENTING: route baru/berubah/field query BARU AKTIF SETELAH DEVICE REBOOT.',
         fields: [
             { key: 'path', label: 'Path', type: 'text', default: '/status' },
-            { key: 'file', label: 'File HTML', type: 'file-upload', default: '' },
+            { key: 'query_a_name', label: 'Query A Name (utk output 1)', type: 'text', default: '' },
+            { key: 'query_b_name', label: 'Query B Name (utk output 2)', type: 'text', default: '' },
+            { key: 'file', label: 'File HTML (fallback kalau input kosong)', type: 'file-upload', default: '' },
             { key: 'content_type', label: 'Content-Type', type: 'select',
               options: ['text/html', 'text/plain'], default: 'text/html' },
         ],
@@ -309,10 +311,12 @@ const INPUT_PORT_LABELS = {
     pwm_output: ['duty % (0-100)'],
     servo: ['sudut (0-180 derajat)'],
     ws2812: ['R (0-255)', 'G (0-255)', 'B (0-255)'],
+    http_endpoint: ['response (kosong = pakai file statis)'],
 };
 
 const OUTPUT_PORT_LABELS = {
     i2c_read_reg: ['raw_bytes', 'error'],
     ctu: ['bool (count >= preset)', 'count (angka)'],
     ultrasonic: ['jarak (cm)', 'error'],
+    http_endpoint: ['query A', 'query B'],
 };

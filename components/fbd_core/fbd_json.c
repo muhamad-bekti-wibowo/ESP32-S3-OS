@@ -545,10 +545,13 @@ static bool parse_params(const cJSON *params, fbd_node_t *node, char *err, size_
                 set_err(err, err_len, "http_endpoint: params.path harus mulai dengan '/'");
                 return false;
             }
-            if (strlen(file->valuestring) == 0) {
-                set_err(err, err_len, "http_endpoint: params.file tidak boleh kosong");
-                return false;
-            }
+            /* file BOLEH kosong sekarang - kalau input port (response
+             * dinamis) tersambung, file statis tidak pernah dipakai.
+             * Validasi "file wajib ADA kalau input kosong" tidak
+             * dilakukan di sini (parse time) karena link belum tentu
+             * sudah diproses saat case ini dieksekusi - fallback ke
+             * balasan "file endpoint tidak ditemukan" di runtime kalau
+             * user memang salah konfigurasi (bukan kesalahan fatal). */
             strncpy(node->params.http_path, path->valuestring, sizeof(node->params.http_path) - 1);
             node->params.http_path[sizeof(node->params.http_path) - 1] = '\0';
             strncpy(node->params.http_file, file->valuestring, sizeof(node->params.http_file) - 1);
@@ -556,6 +559,20 @@ static bool parse_params(const cJSON *params, fbd_node_t *node, char *err, size_
             const cJSON *content_type = cJSON_GetObjectItem(params, "content_type");
             node->params.http_content_type_html =
                 !(content_type && cJSON_IsString(content_type) && strcmp(content_type->valuestring, "text/plain") == 0);
+            const cJSON *query_a_name = cJSON_GetObjectItem(params, "query_a_name");
+            const cJSON *query_b_name = cJSON_GetObjectItem(params, "query_b_name");
+            if (query_a_name && cJSON_IsString(query_a_name)) {
+                strncpy(node->params.http_query_a_name, query_a_name->valuestring, sizeof(node->params.http_query_a_name) - 1);
+                node->params.http_query_a_name[sizeof(node->params.http_query_a_name) - 1] = '\0';
+            } else {
+                node->params.http_query_a_name[0] = '\0';
+            }
+            if (query_b_name && cJSON_IsString(query_b_name)) {
+                strncpy(node->params.http_query_b_name, query_b_name->valuestring, sizeof(node->params.http_query_b_name) - 1);
+                node->params.http_query_b_name[sizeof(node->params.http_query_b_name) - 1] = '\0';
+            } else {
+                node->params.http_query_b_name[0] = '\0';
+            }
             break;
         }
         case FBD_NODE_AND:
@@ -831,6 +848,8 @@ static cJSON *serialize_params(const fbd_node_t *node)
             cJSON_AddStringToObject(params, "path", node->params.http_path);
             cJSON_AddStringToObject(params, "file", node->params.http_file);
             cJSON_AddStringToObject(params, "content_type", node->params.http_content_type_html ? "text/html" : "text/plain");
+            cJSON_AddStringToObject(params, "query_a_name", node->params.http_query_a_name);
+            cJSON_AddStringToObject(params, "query_b_name", node->params.http_query_b_name);
             break;
         default:
             break;

@@ -12,6 +12,7 @@
 #include "fbd_json.h"
 #include "wifi_mgr.h"
 #include "endpoint_mgr.h"
+#include "http_endpoint_bridge.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_ota_ops.h"
@@ -532,26 +533,114 @@ static esp_err_t ota_status_get_handler(httpd_req_t *req)
 #define ENDPOINT_FILE_DIR "/spiffs/endpoints"
 #define ENDPOINT_FILE_MAX_SIZE (64 * 1024) /* 64KB cukup longgar utk halaman HTML+CSS sederhana */
 
-/* Handler generik dipakai server KEDUA - membaca file dari /spiffs/endpoints/
- * sesuai http_file yang di-bind lewat httpd_uri_t.user_ctx (nama file,
- * bukan path lengkap - dihitung di sini). content_type juga lewat user_ctx
- * (di-encode di string statis "file|content_type" saat registrasi, lihat
- * register_http_endpoints()). */
+/* Handler generik dipakai server KEDUA. user_ctx (dibuat di
+ * register_http_endpoints()) berisi "file|content_type|query_a_name|query_b_name"
+ * - path node itu sendiri TIDAK perlu di-encode di sini, cukup pakai
+ * req->uri yang sudah dipotong query string-nya (lihat bridge_path di
+ * bawah) - req->uri MENTAH beda dari node->params.http_path kalau
+ * request punya query string (mis. "/add?a=3" vs "/add").
+ *
+ * Alur (lihat http_endpoint_bridge.h untuk kenapa lewat bridge, bukan
+ * baca/tulis node langsung):
+ * 1. Parse query string request (mis. ?a=1&b=2) sesuai query_a_name/
+ *    query_b_name dari user_ctx, tulis ke bridge (http_endpoint_bridge_
+ *    set_query) - fbd_graph.c evaluate_node() akan baca nilai ini di
+ *    scan cycle BERIKUTNYA untuk outputs[0]/outputs[1] node.
+ * 2. Tunggu (polling singkat, maks ~40ms - 2x SCAN_PERIOD_MS main.c)
+ *    sampai scan cycle itu selesai DAN node menulis response baru lewat
+ *    inputs[0]-nya (kalau tersambung) - http_endpoint_bridge_wait_response.
+ * 3. Kalau ada response dinamis (has_response=true, artinya inputs[0]
+ *    node TERSAMBUNG ke node lain), balas dengan nilai itu (teks angka).
+ *    Kalau TIDAK (node tidak punya input tersambung sama sekali),
+ *    fallback ke file statis seperti sebelumnya - mode lama tetap jalan
+ *    utuh untuk endpoint yang murni informasi statis. */
 static esp_err_t endpoint_get_handler(httpd_req_t *req)
 {
+    /* req->uri di esp_http_server BERISI query string apa adanya (mis.
+     * "/add?a=3&b=4"), BEDA dari node->params.http_path ("/add") yang
+     * dipakai fbd_graph.c evaluate_node() sebagai key bridge. Kalau
+     * dipakai langsung sebagai key (bug versi awal fitur ini), setiap
+     * request dengan query berbeda bikin slot bridge BARU yang tidak
+     * pernah ditulis scan task - has_response selalu false, endpoint
+     * selalu fallback ke file statis walau input node tersambung. Potong
+     * '?' supaya key SELALU sama dengan http_path, apa pun query-nya. */
+    char bridge_path[HTTP_ENDPOINT_BRIDGE_PATH_LEN];
+    strncpy(bridge_path, req->uri, sizeof(bridge_path) - 1);
+    bridge_path[sizeof(bridge_path) - 1] = '\0';
+    char *qmark = strchr(bridge_path, '?');
+    if (qmark) *qmark = '\0';
+
     const char *user_ctx = (const char *)req->user_ctx;
     char file[32] = {0};
     char content_type[16] = "text/html";
-    const char *sep = strchr(user_ctx, '|');
-    if (sep) {
-        size_t file_len = (size_t)(sep - user_ctx);
-        if (file_len >= sizeof(file)) file_len = sizeof(file) - 1;
-        memcpy(file, user_ctx, file_len);
-        strncpy(content_type, sep + 1, sizeof(content_type) - 1);
-    } else {
-        strncpy(file, user_ctx, sizeof(file) - 1);
+    char query_a_name[16] = {0};
+    char query_b_name[16] = {0};
+    {
+        /* strtok_r TIDAK BOLEH dipakai di sini: field "file" sering kosong
+         * (endpoint dinamis tanpa file fallback), dan strtok_r melompati
+         * delimiter beruntun/di awal string - artinya field kosong
+         * "hilang", menggeser SEMUA field sesudahnya (content_type jadi
+         * isi file, query_a_name jadi isi content_type, dst). Split manual
+         * per '|' di bawah ini mempertahankan field kosong apa adanya. */
+        char ctx_copy[96];
+        strncpy(ctx_copy, user_ctx, sizeof(ctx_copy) - 1);
+        ctx_copy[sizeof(ctx_copy) - 1] = '\0';
+        char *fields[4] = {NULL, NULL, NULL, NULL};
+        char *p = ctx_copy;
+        for (int i = 0; i < 4 && p; ++i) {
+            fields[i] = p;
+            char *sep = strchr(p, '|');
+            if (sep) { *sep = '\0'; p = sep + 1; } else { p = NULL; }
+        }
+        if (fields[0]) strncpy(file, fields[0], sizeof(file) - 1);
+        if (fields[1] && fields[1][0]) strncpy(content_type, fields[1], sizeof(content_type) - 1);
+        if (fields[2]) strncpy(query_a_name, fields[2], sizeof(query_a_name) - 1);
+        if (fields[3]) strncpy(query_b_name, fields[3], sizeof(query_b_name) - 1);
     }
 
+    /* Baca query string request SEKARANG, tulis ke bridge sebelum
+     * menunggu - kalau query_a_name/query_b_name kosong (user tidak
+     * konfigurasi port itu), tetap tulis 0.0f (aman, outputs node ini
+     * memang akan 0 di kasus itu, konsisten dengan fbd_graph.c). */
+    float query_a = 0.0f, query_b = 0.0f;
+    size_t qs_len = httpd_req_get_url_query_len(req);
+    if (qs_len > 0 && qs_len < 128) {
+        char qs[128];
+        httpd_req_get_url_query_str(req, qs, sizeof(qs));
+        char val[32];
+        if (query_a_name[0] && httpd_query_key_value(qs, query_a_name, val, sizeof(val)) == ESP_OK) {
+            query_a = strtof(val, NULL);
+        }
+        if (query_b_name[0] && httpd_query_key_value(qs, query_b_name, val, sizeof(val)) == ESP_OK) {
+            query_b = strtof(val, NULL);
+        }
+    }
+
+    uint32_t revision_before = http_endpoint_bridge_get_response(bridge_path).revision;
+    http_endpoint_bridge_set_query(bridge_path, query_a, query_b);
+
+    /* Timeout 80ms = 4x SCAN_PERIOD_MS (main.c). wait_response menunggu 2
+     * kenaikan revision (~2 scan cycle) supaya nilai feedback dari node
+     * hilir seperti Math sempat terdorong balik ke input0 endpoint ini -
+     * lihat komentar di http_endpoint_bridge_wait_response(). 80ms
+     * memberi margin dari 2 cycle minimum (40ms) tanpa membuat request
+     * menggantung lama kalau scan task lagi telat. */
+    http_endpoint_bridge_response_t resp = http_endpoint_bridge_wait_response(bridge_path, revision_before, 80);
+
+    if (resp.has_response) {
+        char body[32];
+        if (resp.value == (float)(long)resp.value) {
+            snprintf(body, sizeof(body), "%ld", (long)resp.value);
+        } else {
+            snprintf(body, sizeof(body), "%.4f", resp.value);
+        }
+        httpd_resp_set_type(req, content_type);
+        httpd_resp_sendstr(req, body);
+        return ESP_OK;
+    }
+
+    /* Tidak ada response dinamis (inputs[0] node tidak tersambung) -
+     * fallback ke file statis, PERSIS perilaku sebelum fitur ini ada. */
     char path[80];
     snprintf(path, sizeof(path), "%s/%s", ENDPOINT_FILE_DIR, file);
     FILE *f = fopen(path, "r");
@@ -690,19 +779,21 @@ static esp_err_t endpoints_config_post_handler(httpd_req_t *req)
 /* Daftarkan route HTTP kustom (node http_endpoint) di server httpd KEDUA,
  * dibaca dari graph aktif SAAT INI (dipanggil sekali setelah
  * load_program_file_at_startup(), sebelum server kedua di-start).
- * user_ctx per handler diisi string statis "file|content_type" yang
- * SENGAJA tidak pernah di-free (hidup selama program berjalan, jumlahnya
- * dibatasi FBD_MAX_NODES sehingga tidak bisa leak tanpa batas). */
+ * user_ctx per handler diisi string statis
+ * "file|content_type|query_a_name|query_b_name" yang SENGAJA tidak
+ * pernah di-free (hidup selama program berjalan, jumlahnya dibatasi
+ * FBD_MAX_NODES sehingga tidak bisa leak tanpa batas). */
 static void register_http_endpoints(httpd_handle_t server, const fbd_graph_t *graph)
 {
     for (size_t i = 0; i < graph->node_count; ++i) {
         const fbd_node_t *node = &graph->nodes[i];
         if (node->type != FBD_NODE_HTTP_ENDPOINT) continue;
 
-        char *user_ctx = malloc(80);
+        char *user_ctx = malloc(96);
         if (!user_ctx) continue;
-        snprintf(user_ctx, 80, "%s|%s", node->params.http_file,
-                 node->params.http_content_type_html ? "text/html" : "text/plain");
+        snprintf(user_ctx, 96, "%s|%s|%s|%s", node->params.http_file,
+                 node->params.http_content_type_html ? "text/html" : "text/plain",
+                 node->params.http_query_a_name, node->params.http_query_b_name);
 
         httpd_uri_t *uri = malloc(sizeof(httpd_uri_t));
         if (!uri) { free(user_ctx); continue; }
@@ -849,6 +940,10 @@ void web_ui_start(logic_program_t *legacy_prog,
     s_active_graph_ptr = active_graph_ptr;
     s_standby_graph_ptr = standby_graph_ptr;
     s_reload_requested_ptr = reload_requested_ptr;
+
+    /* Dipanggil SEBELUM fbd_scan_task dibuat (main.c) - aman tanpa race,
+     * scan task belum ada yang bisa baca/tulis bridge bersamaan. */
+    http_endpoint_bridge_init();
 
     mount_spiffs();
     load_program_file_at_startup();
