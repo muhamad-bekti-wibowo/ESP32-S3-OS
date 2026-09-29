@@ -364,6 +364,22 @@ function wirePaletteDragDrop(container) {
     });
 }
 
+/* Menu System (☰) di toolbar - dropdown berisi link System > Network,
+ * System > Firmware, dst. Dipisah dari tombol utama supaya toolbar
+ * tidak makin panjang tiap kali ada halaman System baru ditambahkan. */
+function toggleToolbarMenu() {
+    document.getElementById('toolbar-menu-dropdown').classList.toggle('is-open');
+}
+
+function wireToolbarMenu() {
+    document.addEventListener('click', (e) => {
+        const menu = document.querySelector('.toolbar-menu');
+        if (menu && !menu.contains(e.target)) {
+            document.getElementById('toolbar-menu-dropdown').classList.remove('is-open');
+        }
+    });
+}
+
 function initEditor() {
     const container = document.getElementById('drawflow');
     editor = new Drawflow(container);
@@ -622,3 +638,4 @@ async function loadProgram() {
 }
 
 initEditor();
+wireToolbarMenu();

@@ -25,8 +25,13 @@
   <button onclick="saveProgram()">Save</button>
   <button onclick="loadProgram()">Load</button>
   <button id="toolbar-live-btn" onclick="toggleLiveMonitor()">Live: OFF</button>
-  <a href="/network.html" id="toolbar-network-link">System &gt; Network</a>
-  <a href="/ota.html" id="toolbar-ota-link">System &gt; Firmware</a>
+  <div class="toolbar-menu">
+    <button id="toolbar-menu-btn" onclick="toggleToolbarMenu()" aria-label="Menu System" title="Menu System">&#9776;</button>
+    <div id="toolbar-menu-dropdown" class="toolbar-menu-dropdown">
+      <a href="/network.html">System &gt; Network</a>
+      <a href="/ota.html">System &gt; Firmware</a>
+    </div>
+  </div>
   <span id="toolbar-status"></span>
 </div>
 

@@ -451,17 +451,62 @@ h3 {
     padding: 0 8px;
 }
 
-#toolbar-network-link,
-#toolbar-ota-link {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text-muted);
-    text-decoration: none;
-    padding: 0 4px;
+/* Menu System (☰) - tombol hamburger + dropdown, menggantikan link teks
+ * lepas di toolbar supaya tidak makin panjang tiap ada halaman System
+ * baru ditambahkan (Network, Firmware, dst). */
+.toolbar-menu {
+    position: relative;
 }
 
-#toolbar-network-link:hover,
-#toolbar-ota-link:hover {
+/* #toolbar button (ID + tag) punya specificity lebih tinggi dari
+ * #toolbar-menu-btn (ID saja) - selector di sini disamakan bentuknya
+ * (#toolbar .toolbar-menu button) supaya menang tanpa !important. */
+#toolbar .toolbar-menu button#toolbar-menu-btn {
+    background: var(--bg);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    font-size: 16px;
+    line-height: 1;
+    padding: 9px 14px;
+}
+
+#toolbar .toolbar-menu button#toolbar-menu-btn:hover {
+    color: var(--accent);
+    border-color: var(--accent-border);
+    opacity: 1;
+}
+
+.toolbar-menu-dropdown {
+    display: none;
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    min-width: 180px;
+    background: var(--panel-bg);
+    border: 1px solid var(--accent-border);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-lg);
+    padding: 6px;
+    flex-direction: column;
+}
+
+.toolbar-menu-dropdown.is-open {
+    display: flex;
+}
+
+.toolbar-menu-dropdown a {
+    display: block;
+    padding: 9px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    text-decoration: none;
+    border-radius: var(--radius-sm);
+    white-space: nowrap;
+}
+
+.toolbar-menu-dropdown a:hover {
+    background: var(--accent-soft);
     color: var(--accent);
 }
 
