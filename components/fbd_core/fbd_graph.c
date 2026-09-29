@@ -142,8 +142,20 @@ static fbd_value_t evaluate_node(fbd_node_t *node, fbd_var_store_t *vars, uint32
             return fbd_eval_tp(in[0], node->params.delay_ms, now_ms, &node->state.timer);
         case FBD_NODE_OSC:
             return fbd_eval_osc(node->params.osc_on_ms, node->params.osc_off_ms, now_ms, &node->state.timer);
-        case FBD_NODE_CTU:
-            return fbd_eval_ctu(in[0], in[1], node->params.preset, &node->state.counter);
+        case FBD_NODE_CTU: {
+            /* Port: in0=up, in1=down, in2=reset, in3=reset_value (angka
+             * tujuan reset, BUKAN selalu 0 - bisa dari node lain, mis.
+             * Constant atau hasil hitungan). reset_value dibaca live tiap
+             * cycle (bukan cuma saat reset aktif) supaya nilainya selalu
+             * konsisten kapan pun reset dipicu.
+             * outputs[0]=bool (count>=preset), outputs[1]=angka count
+             * aktual (state->count dibaca SETELAH fbd_eval_ctud() selesai
+             * memutasinya, supaya reflect nilai paling baru cycle ini). */
+            int32_t reset_value = (int32_t)fbd_to_float(in[3]);
+            fbd_value_t result = fbd_eval_ctud(in[0], in[1], in[2], reset_value, node->params.preset, &node->state.counter);
+            *out_secondary = fbd_make_int(node->state.counter.count);
+            return result;
+        }
         case FBD_NODE_DIGITAL_IN: {
             /* Backend simulated: no-op, nilai tetap datang dari inputs[0]
              * yang di-set scan task/test (pass-through) - supaya test host

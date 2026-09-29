@@ -82,11 +82,18 @@ fbd_value_t fbd_eval_osc(uint32_t on_ms, uint32_t off_ms, uint32_t now_ms, fbd_t
 
 typedef struct {
     int32_t count;
-    bool prev_clk;
+    bool prev_up;
+    bool prev_down;
 } fbd_counter_state_t;
 
-/* CTU: naik tiap tepi naik (OFF->ON) di clk. Output true saat count >= preset_value. */
-fbd_value_t fbd_eval_ctu(fbd_value_t clk, fbd_value_t reset, int32_t preset_value, fbd_counter_state_t *state);
+/* CTUD (counter up/down): count naik 1 tiap tepi naik (OFF->ON) di port
+ * up, turun 1 tiap tepi naik di port down - keduanya independen, bisa
+ * naik dan turun di scan cycle yang sama kalau kebetulan kedua tepi naik
+ * bersamaan (tidak saling membatalkan). reset (tepi naik) mengembalikan
+ * count ke reset_value (BUKAN selalu 0 - beda dari CTU versi lama).
+ * Output true saat count >= preset_value. */
+fbd_value_t fbd_eval_ctud(fbd_value_t up, fbd_value_t down, fbd_value_t reset,
+                           int32_t reset_value, int32_t preset_value, fbd_counter_state_t *state);
 
 #ifdef __cplusplus
 }

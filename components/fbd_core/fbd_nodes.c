@@ -208,17 +208,30 @@ fbd_value_t fbd_eval_osc(uint32_t on_ms, uint32_t off_ms, uint32_t now_ms, fbd_t
     return fbd_make_bool(state->running);
 }
 
-fbd_value_t fbd_eval_ctu(fbd_value_t clk, fbd_value_t reset, int32_t preset_value, fbd_counter_state_t *state)
+fbd_value_t fbd_eval_ctud(fbd_value_t up, fbd_value_t down, fbd_value_t reset,
+                           int32_t reset_value, int32_t preset_value, fbd_counter_state_t *state)
 {
+    bool up_now = fbd_to_bool(up);
+    bool down_now = fbd_to_bool(down);
+
     if (fbd_to_bool(reset)) {
-        state->count = 0;
-        state->prev_clk = false;
-        return fbd_make_bool(false);
+        state->count = reset_value;
+        state->prev_up = up_now;
+        state->prev_down = down_now;
+        return fbd_make_bool(reset_value >= preset_value);
     }
-    bool clk_now = fbd_to_bool(clk);
-    if (clk_now && !state->prev_clk) {
+
+    /* up/down independen - tepi naik keduanya dites terpisah, bukan
+     * if/else-if, supaya kalau kebetulan dua-duanya naik bersamaan di
+     * cycle yang sama, count tetap konsisten (+1-1=0), tidak salah satu
+     * "diabaikan" begitu saja. */
+    if (up_now && !state->prev_up) {
         state->count++;
     }
-    state->prev_clk = clk_now;
+    if (down_now && !state->prev_down) {
+        state->count--;
+    }
+    state->prev_up = up_now;
+    state->prev_down = down_now;
     return fbd_make_bool(state->count >= preset_value);
 }

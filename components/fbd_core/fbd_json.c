@@ -297,6 +297,9 @@ static bool parse_params(const cJSON *params, fbd_node_t *node, char *err, size_
             break;
         }
         case FBD_NODE_CTU: {
+            /* reset_value BUKAN params - itu port input ke-4 (in3), bisa
+             * datang dari node lain (mis. Constant), bukan angka tetap di
+             * JSON node ini sendiri. Lihat fbd_graph.c evaluate_node(). */
             const cJSON *preset = cJSON_GetObjectItem(params, "preset");
             if (!preset) {
                 set_err(err, err_len, "ctu: params.preset wajib");

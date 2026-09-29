@@ -124,8 +124,8 @@ const NODE_TYPES = {
         fields: [{ key: 'pulse_ms', label: 'Pulse (ms)', type: 'number', default: 500 }],
     },
     ctu: {
-        label: 'Counter (CTU)', inputs: 2, outputs: 1, category: 'timing', icon: 'counter',
-        help: 'Counter naik: port clk bertambah 1 tiap transisi false->true, port reset mengembalikan ke 0. Output true kalau hitungan >= Preset.',
+        label: 'Counter (CTUD)', inputs: 4, outputs: 2, category: 'timing', icon: 'counter',
+        help: 'Counter naik/turun: port Up (+1) dan Down (-1) independen, masing-masing tiap transisi false->true. Port Reset mengembalikan hitungan ke nilai di port Reset Value (BUKAN selalu 0 - bisa disambung dari Constant atau node lain). Output 1 (atas) = bool, true kalau hitungan >= Preset. Output 2 (bawah) = angka hitungan itu sendiri.',
         fields: [{ key: 'preset', label: 'Preset', type: 'number', default: 3 }],
     },
     osc: {
@@ -275,7 +275,7 @@ const INPUT_PORT_LABELS = {
     ton: ['in'],
     tof: ['in'],
     tp: ['in'],
-    ctu: ['clk', 'reset'],
+    ctu: ['up', 'down', 'reset', 'reset value'],
     digital_output: ['in'],
     pwm_output: ['duty % (0-100)'],
     servo: ['sudut (0-180 derajat)'],
@@ -284,4 +284,5 @@ const INPUT_PORT_LABELS = {
 
 const OUTPUT_PORT_LABELS = {
     i2c_read_reg: ['raw_bytes', 'error'],
+    ctu: ['bool (count >= preset)', 'count (angka)'],
 };

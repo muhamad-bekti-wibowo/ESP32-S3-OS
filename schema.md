@@ -128,12 +128,41 @@ Contoh:
 | `tof` | `{ "delay_ms": 2000 }` | sama seperti `ton` |
 | `tp` | `{ "pulse_ms": 500 }` | sama seperti `ton` |
 | `osc` | `{ "on_ms": 500, "off_ms": 500 }` | sama seperti `ton` (`running` dipakai sebagai fase ON/OFF sekarang, bukan "sedang menghitung") |
-| `ctu` | `{ "preset": 3 }` | `{ "count": 0, "prev_clk": false }` |
+| `ctu` | `{ "preset": 3 }` | `{ "count": 0, "prev_up": false, "prev_down": false }` |
 
 Contoh:
 ```json
 { "id": "t1", "type": "ton", "params": { "delay_ms": 2000 } }
 ```
+
+`ctu` (Counter Up/Down, CTUD) punya **4 input port** dan **2 output port**
+— beda dari node timer lain di atas:
+
+| Port input | Arti |
+|---|---|
+| `in0` (up) | Hitungan +1 tiap transisi false→true (edge naik) |
+| `in1` (down) | Hitungan -1 tiap transisi false→true (edge naik), independen dari `up` |
+| `in2` (reset) | Selama true, hitungan dipaksa ke nilai `in3` (reset_value) |
+| `in3` (reset_value) | Nilai tujuan reset — **bukan selalu 0**, bisa dari `const` atau node lain, dibaca live tiap scan cycle |
+
+| Port output | Arti |
+|---|---|
+| `out0` | `bool`, `true` kalau hitungan `>= params.preset` |
+| `out1` | `int32`, hitungan itu sendiri (nilai mentah, bukan hasil threshold) |
+
+`up` dan `down` independen — kalau kebetulan tepi naik keduanya terjadi di
+scan cycle yang sama, keduanya tetap diproses (+1 dan -1), saling
+meniadakan, bukan salah satu diabaikan.
+
+Contoh — counter naik/turun tombol fisik, reset ke 10:
+```json
+{ "id": "btn_up", "type": "digital_input", "params": { "pin": 4, "mode": "pullup", "invert": true, "hw_mode": "real" } }
+{ "id": "btn_down", "type": "digital_input", "params": { "pin": 5, "mode": "pullup", "invert": true, "hw_mode": "real" } }
+{ "id": "btn_reset", "type": "digital_input", "params": { "pin": 6, "mode": "pullup", "invert": true, "hw_mode": "real" } }
+{ "id": "reset_to", "type": "const", "params": { "datatype": "int32", "value": 10 } }
+{ "id": "counter1", "type": "ctu", "params": { "preset": 20 } }
+```
+(link: `btn_up→counter1.in0`, `btn_down→counter1.in1`, `btn_reset→counter1.in2`, `reset_to→counter1.in3`)
 
 `osc` (osilator/clock generator) **tidak punya input** — output bergantian
 `true`/`false` terus-menerus tanpa dipicu apa pun, dimulai dari fase
