@@ -125,7 +125,7 @@ const NODE_TYPES = {
     },
     ctu: {
         label: 'Counter (CTUD)', inputs: 4, outputs: 2, category: 'timing', icon: 'counter',
-        help: 'Counter naik/turun: port Up (+1) dan Down (-1) independen, masing-masing tiap transisi false->true. Port Reset mengembalikan hitungan ke nilai di port Reset Value (BUKAN selalu 0 - bisa disambung dari Constant atau node lain). Output 1 (atas) = bool, true kalau hitungan >= Preset. Output 2 (bawah) = angka hitungan itu sendiri.',
+        help: '4 port input, wajib disambung SEMUA: (1) Up = hitungan +1 tiap transisi false->true. (2) Down = hitungan -1 tiap transisi false->true, independen dari Up. (3) Reset = SAKLAR yang harus di-trigger eksplisit (mis. dari tombol/timer) - selama port ini true, hitungan dipaksa ke port Reset Value. (4) Reset Value = angka tujuan reset, HANYA berlaku selama port Reset aktif. PENTING: menyambung sesuatu ke Reset Value SAJA tidak membatasi hitungan apa pun - kalau port Reset dibiarkan kosong (selalu false), hitungan akan terus naik/turun tanpa batas dari Up/Down, Reset Value tidak pernah dipakai. Output 1 (atas) = bool, true kalau hitungan >= Preset. Output 2 (bawah) = angka hitungan itu sendiri.',
         fields: [{ key: 'preset', label: 'Preset', type: 'number', default: 3 }],
     },
     osc: {
@@ -275,7 +275,7 @@ const INPUT_PORT_LABELS = {
     ton: ['in'],
     tof: ['in'],
     tp: ['in'],
-    ctu: ['up', 'down', 'reset', 'reset value'],
+    ctu: ['up (+1)', 'down (-1)', 'reset (saklar, wajib trigger eksplisit)', 'reset value (cuma berlaku selama reset aktif)'],
     digital_output: ['in'],
     pwm_output: ['duty % (0-100)'],
     servo: ['sudut (0-180 derajat)'],
