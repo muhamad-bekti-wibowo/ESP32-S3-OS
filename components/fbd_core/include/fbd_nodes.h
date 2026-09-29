@@ -95,6 +95,15 @@ typedef struct {
 fbd_value_t fbd_eval_ctud(fbd_value_t up, fbd_value_t down, fbd_value_t reset,
                            int32_t reset_value, int32_t preset_value, fbd_counter_state_t *state);
 
+/* CTL (counter loop/self-resetting): sama seperti CTUD tapi TANPA port
+ * reset manual - begitu count >= preset_value, OTOMATIS kembali ke
+ * reset_value di scan cycle yang sama (bukan menunggu trigger eksternal).
+ * Cocok untuk pola berulang (mis. animasi LED bertahap: 0,1,2,3,0,1,2,3...)
+ * tanpa perlu node tombol/timer tambahan untuk reset. up/down tetap
+ * independen sama seperti CTUD. */
+fbd_value_t fbd_eval_ctl(fbd_value_t up, fbd_value_t down,
+                          int32_t reset_value, int32_t preset_value, fbd_counter_state_t *state);
+
 #ifdef __cplusplus
 }
 #endif

@@ -129,6 +129,7 @@ Contoh:
 | `tp` | `{ "pulse_ms": 500 }` | sama seperti `ton` |
 | `osc` | `{ "on_ms": 500, "off_ms": 500 }` | sama seperti `ton` (`running` dipakai sebagai fase ON/OFF sekarang, bukan "sedang menghitung") |
 | `ctu` | `{ "preset": 3 }` | `{ "count": 0, "prev_up": false, "prev_down": false }` |
+| `ctl` | `{ "preset": 5, "reset_value": 0 }` | sama seperti `ctu` |
 
 Contoh:
 ```json
@@ -163,6 +164,37 @@ Contoh — counter naik/turun tombol fisik, reset ke 10:
 { "id": "counter1", "type": "ctu", "params": { "preset": 20 } }
 ```
 (link: `btn_up→counter1.in0`, `btn_down→counter1.in1`, `btn_reset→counter1.in2`, `reset_to→counter1.in3`)
+
+### Counter Loop (CTL) — variasi CTU yang auto-reset sendiri
+
+`ctl` sama seperti `ctu` (up/down independen), TAPI **tanpa port
+reset/reset_value** — begitu hitungan `>= params.preset`, **otomatis**
+dikembalikan ke `params.reset_value` di scan cycle yang sama, tanpa
+perlu trigger eksternal apa pun. Cocok untuk pola berulang (mis. animasi
+LED bertahap) yang butuh siklus otomatis, bukan reset manual dari
+tombol/timer.
+
+| Port input | Arti |
+|---|---|
+| `in0` (up) | Hitungan +1 tiap transisi false→true |
+| `in1` (down) | Hitungan -1 tiap transisi false→true |
+
+| Port output | Arti |
+|---|---|
+| `out0` | **Selalu `false`** — tidak berguna sebagai threshold di node ini |
+| `out1` | `int32`, hitungan itu sendiri (satu-satunya output berarti) |
+
+**Beda penting dari `ctu`:** `reset_value` di `ctl` adalah **params**
+(angka tetap dikonfigurasi user), bukan port — karena auto-reset tidak
+butuh trigger dari node lain.
+
+Contoh — siklus 0→4 berulang terus (mis. untuk indeks animasi):
+```json
+{ "id": "clk1", "type": "osc", "params": { "on_ms": 200, "off_ms": 200 } }
+{ "id": "idx1", "type": "ctl", "params": { "preset": 5, "reset_value": 0 } }
+```
+(link: `clk1→idx1.in0`) — `idx1.out1` menghasilkan 0,1,2,3,4,0,1,2,3,4,...
+terus-menerus tiap `clk1` berkedip.
 
 `osc` (osilator/clock generator) **tidak punya input** — output bergantian
 `true`/`false` terus-menerus tanpa dipicu apa pun, dimulai dari fase

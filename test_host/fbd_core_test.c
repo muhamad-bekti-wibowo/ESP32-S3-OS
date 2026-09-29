@@ -205,6 +205,43 @@ static void test_counter_ctud(void)
     CHECK(st2.count == 0, "CTUD: up+down bersamaan (tepi naik keduanya) -> saling meniadakan, count tetap 0");
 }
 
+static void test_counter_ctl(void)
+{
+    fbd_counter_state_t st = {0};
+    fbd_value_t off = fbd_make_bool(false);
+    fbd_value_t on = fbd_make_bool(true);
+    fbd_value_t out;
+
+    /* preset=3, reset_value=0 -> siklus berulang 0,1,2,3->reset ke 0. */
+    out = fbd_eval_ctl(on, off, 0, 3, &st);
+    CHECK(st.count == 1, "CTL: naik 1x, count=1 (di bawah preset 3)");
+    CHECK(fbd_to_bool(out) == false, "CTL: outputs[0] selalu false");
+
+    fbd_eval_ctl(off, off, 0, 3, &st);
+    fbd_eval_ctl(on, off, 0, 3, &st);
+    CHECK(st.count == 2, "CTL: naik lagi, count=2");
+
+    fbd_eval_ctl(off, off, 0, 3, &st);
+    fbd_eval_ctl(on, off, 0, 3, &st);
+    /* count seharusnya jadi 3 (>=preset 3), tapi auto-reset dites di
+     * cycle YANG SAMA (bukan cycle berikutnya) - jadi count langsung
+     * kembali ke reset_value (0) sebelum sempat "terlihat" 3. Ini
+     * sengaja (lihat komentar fbd_eval_ctl di fbd_nodes.c): siklus
+     * berulang TANPA trigger reset manual, tanpa jeda satu cycle. */
+    CHECK(st.count == 0, "CTL: count mencapai preset (3) -> auto-reset ke 0 di cycle yang sama");
+
+    fbd_eval_ctl(off, off, 0, 3, &st);
+    fbd_eval_ctl(on, off, 0, 3, &st);
+    CHECK(st.count == 1, "CTL: setelah auto-reset, naik lagi dari 0 jadi 1 - siklus berulang TANPA trigger reset manual");
+
+    /* reset_value tidak selalu 0 - dites juga sesuai permintaan "reset sesuai angka". */
+    fbd_counter_state_t st2 = {0};
+    fbd_eval_ctl(on, off, 100, 2, &st2); /* count=1 */
+    fbd_eval_ctl(off, off, 100, 2, &st2);
+    fbd_eval_ctl(on, off, 100, 2, &st2); /* count=2 -> >=preset -> auto-reset ke 100 */
+    CHECK(st2.count == 100, "CTL: auto-reset ke reset_value custom (100), bukan selalu 0");
+}
+
 int main(void)
 {
     test_sizeof();
@@ -216,6 +253,7 @@ int main(void)
     test_timer_tof_tp();
     test_timer_osc();
     test_counter_ctud();
+    test_counter_ctl();
 
     printf("\n%s (%d gagal)\n", g_fail == 0 ? "SEMUA TEST LOLOS" : "ADA TEST GAGAL", g_fail);
     return g_fail == 0 ? 0 : 1;

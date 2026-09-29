@@ -156,6 +156,16 @@ static fbd_value_t evaluate_node(fbd_node_t *node, fbd_var_store_t *vars, uint32
             *out_secondary = fbd_make_int(node->state.counter.count);
             return result;
         }
+        case FBD_NODE_CTL: {
+            /* Port: in0=up, in1=down (sama seperti CTU) - TIDAK ADA port
+             * reset/reset_value, auto-reset params (ctl_reset_value) dipakai
+             * begitu count>=preset, tanpa trigger eksternal apa pun. outputs[0]
+             * SELALU false (tidak berguna sebagai threshold - count sendiri
+             * jadi satu-satunya output berarti di outputs[1]). */
+            fbd_eval_ctl(in[0], in[1], node->params.ctl_reset_value, node->params.preset, &node->state.counter);
+            *out_secondary = fbd_make_int(node->state.counter.count);
+            return fbd_make_bool(false);
+        }
         case FBD_NODE_DIGITAL_IN: {
             /* Backend simulated: no-op, nilai tetap datang dari inputs[0]
              * yang di-set scan task/test (pass-through) - supaya test host

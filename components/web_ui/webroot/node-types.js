@@ -128,6 +128,14 @@ const NODE_TYPES = {
         help: '4 port input, wajib disambung SEMUA: (1) Up = hitungan +1 tiap transisi false->true. (2) Down = hitungan -1 tiap transisi false->true, independen dari Up. (3) Reset = SAKLAR yang harus di-trigger eksplisit (mis. dari tombol/timer) - selama port ini true, hitungan dipaksa ke port Reset Value. (4) Reset Value = angka tujuan reset, HANYA berlaku selama port Reset aktif. PENTING: menyambung sesuatu ke Reset Value SAJA tidak membatasi hitungan apa pun - kalau port Reset dibiarkan kosong (selalu false), hitungan akan terus naik/turun tanpa batas dari Up/Down, Reset Value tidak pernah dipakai. Output 1 (atas) = bool, true kalau hitungan >= Preset. Output 2 (bawah) = angka hitungan itu sendiri.',
         fields: [{ key: 'preset', label: 'Preset', type: 'number', default: 3 }],
     },
+    ctl: {
+        label: 'Counter Loop (CTL)', inputs: 2, outputs: 2, category: 'timing', icon: 'counter',
+        help: 'Counter naik/turun yang OTOMATIS reset sendiri - begitu hitungan mencapai Preset, langsung kembali ke Reset Value tanpa perlu port reset/trigger apa pun. Cocok untuk pola berulang (mis. Preset=5, Reset Value=0 -> hitungan jadi 0,1,2,3,4,0,1,2,3,4,... terus). Hanya 2 port: Up (+1 tiap transisi false->true) dan Down (-1). Output 1 (atas) selalu false (tidak berguna di sini). Output 2 (bawah) = angka hitungan itu sendiri, dipakai lewat live monitor atau disambung ke node lain.',
+        fields: [
+            { key: 'preset', label: 'Preset', type: 'number', default: 5 },
+            { key: 'reset_value', label: 'Reset Value', type: 'number', default: 0 },
+        ],
+    },
     osc: {
         label: 'Osilator', inputs: 0, outputs: 1, category: 'timing', icon: 'osc',
         help: 'Clock generator: output bergantian ON/OFF terus-menerus tanpa input - ON selama On (ms), lalu OFF selama Off (ms), berulang. Isi keduanya sama untuk blink simetris (mis. LED berkedip rata), atau beda untuk pola asimetris (mis. kedip cepat: On 200ms, Off 800ms).',
@@ -276,6 +284,7 @@ const INPUT_PORT_LABELS = {
     tof: ['in'],
     tp: ['in'],
     ctu: ['up (+1)', 'down (-1)', 'reset (saklar, wajib trigger eksplisit)', 'reset value (cuma berlaku selama reset aktif)'],
+    ctl: ['up (+1)', 'down (-1)'],
     digital_output: ['in'],
     pwm_output: ['duty % (0-100)'],
     servo: ['sudut (0-180 derajat)'],
@@ -285,4 +294,5 @@ const INPUT_PORT_LABELS = {
 const OUTPUT_PORT_LABELS = {
     i2c_read_reg: ['raw_bytes', 'error'],
     ctu: ['bool (count >= preset)', 'count (angka)'],
+    ctl: ['tidak dipakai (selalu false)', 'count (angka)'],
 };
