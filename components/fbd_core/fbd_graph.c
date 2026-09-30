@@ -314,6 +314,16 @@ static fbd_value_t evaluate_node(fbd_node_t *node, fbd_var_store_t *vars, uint32
             return fbd_make_float(ok ? distance_cm : 0.0f);
         }
         case FBD_NODE_I2C_READ_REG: {
+            /* in[0] (opsional) = enable - FBD_EMPTY (tidak tersambung) berarti
+             * SELALU jalan (kompatibel dengan program lama tanpa wire ini).
+             * Kalau tersambung dan false, SKIP bus call sepenuhnya - error=false
+             * ("tidak dicoba" bukan "gagal"), raw_bytes=kosong (len 0), supaya
+             * beda dari hasil NACK asli (error=true) di live monitor/test. */
+            if (in[0].type != FBD_EMPTY && !fbd_to_bool(in[0])) {
+                *out_secondary = fbd_make_bool(false);
+                uint8_t empty_buf[1];
+                return fbd_make_bytes(empty_buf, 0);
+            }
             uint8_t buf[I2C_BRIDGE_MAX_DATA_LEN];
             uint8_t len = node->params.i2c_data_len;
             if (len > sizeof(buf)) len = sizeof(buf);
@@ -323,12 +333,25 @@ static fbd_value_t evaluate_node(fbd_node_t *node, fbd_var_store_t *vars, uint32
             return fbd_make_bytes(buf, len);
         }
         case FBD_NODE_I2C_WRITE_REG: {
+            /* in[0] (opsional) = enable - lihat komentar i2c_read_reg untuk
+             * penjelasan lengkap kontrak "tidak tersambung = selalu jalan". */
+            if (in[0].type != FBD_EMPTY && !fbd_to_bool(in[0])) {
+                return fbd_make_bool(true);
+            }
             bool ok = i2c_bridge_write_reg(node->params.i2c_bus, node->params.i2c_address,
                                             node->params.i2c_register,
                                             node->params.i2c_data, node->params.i2c_data_len);
             return fbd_make_bool(ok);
         }
         case FBD_NODE_I2C_WRITE_BURST: {
+            /* in[0] (opsional) = enable - kalau tersambung dan false, SKIP seluruh
+             * command sequence (tidak ada satu byte pun dikirim ke bus), output
+             * tetap true (bukan gagal, cuma sengaja tidak dieksekusi cycle ini -
+             * dipakai misalnya utk gantian 2 node write_burst tampilkan konten
+             * LCD berbeda lewat toggle boolean dari node Oscillator). */
+            if (in[0].type != FBD_EMPTY && !fbd_to_bool(in[0])) {
+                return fbd_make_bool(true);
+            }
             /* Kirim commands[] berurutan dalam SATU scan cycle. Berhenti di
              * command pertama yang gagal (NACK/timeout) - output = false,
              * sisa command TIDAK dicoba (device kemungkinan sudah dalam

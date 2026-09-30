@@ -110,6 +110,95 @@ static void test_i2c_write_burst_error(void)
           "i2c_write_burst tetap konsisten error=false setelah beberapa cycle (tidak hang)");
 }
 
+/* ---- enable input (opsional, in[0]) - lihat fbd_graph.h/fbd_graph.c ---- */
+
+/* i2c_bridge_stub.c SELALU gagal (NACK) kalau benar-benar dipanggil, jadi
+ * outputs[1]==false (bukan true seperti NACK asli) membuktikan bus call
+ * di-SKIP total, bukan dicoba lalu (kebetulan) sukses. */
+static void test_i2c_read_reg_disabled_skips_bus_call(void)
+{
+    fbd_graph_t g;
+    fbd_graph_init(&g);
+
+    fbd_node_t *i2c_node = fbd_graph_add_node(&g, "i2c1", FBD_NODE_I2C_READ_REG);
+    i2c_node->params.i2c_bus = 0;
+    i2c_node->params.i2c_address = 0x27;
+    i2c_node->params.i2c_register = 0;
+    i2c_node->params.i2c_data_len = 2;
+
+    fbd_node_t *en = fbd_graph_add_node(&g, "en1", FBD_NODE_CONST);
+    en->params.const_value = fbd_make_bool(false);
+
+    fbd_graph_add_link(&g, "en1", 0, "i2c1", 0);
+
+    CHECK(fbd_graph_compile(&g), "compile() sukses untuk i2c_read_reg dengan enable=false");
+    fbd_graph_execute_cycle(&g, 0);
+
+    size_t i2c_idx = fbd_graph_find_node(&g, "i2c1");
+    CHECK(fbd_to_bool(g.nodes[i2c_idx].outputs[1]) == false,
+          "i2c_read_reg disabled (enable=false) -> outputs[1] (error) = false, bukan true seperti NACK asli");
+    CHECK(g.nodes[i2c_idx].outputs[0].type == FBD_BYTES && g.nodes[i2c_idx].outputs[0].bytes.len == 0,
+          "i2c_read_reg disabled -> outputs[0] raw_bytes kosong (len 0), bukti bus call di-skip");
+}
+
+static void test_i2c_write_reg_disabled_skips_bus_call(void)
+{
+    fbd_graph_t g;
+    fbd_graph_init(&g);
+
+    fbd_node_t *w = fbd_graph_add_node(&g, "w1", FBD_NODE_I2C_WRITE_REG);
+    w->params.i2c_bus = 0;
+    w->params.i2c_address = 0x27;
+    w->params.i2c_register = 0;
+    w->params.i2c_data[0] = 0xFF;
+    w->params.i2c_data_len = 1;
+
+    fbd_node_t *en = fbd_graph_add_node(&g, "en1", FBD_NODE_CONST);
+    en->params.const_value = fbd_make_bool(false);
+
+    fbd_graph_add_link(&g, "en1", 0, "w1", 0);
+
+    CHECK(fbd_graph_compile(&g), "compile() sukses untuk i2c_write_reg dengan enable=false");
+    fbd_graph_execute_cycle(&g, 0);
+
+    size_t w_idx = fbd_graph_find_node(&g, "w1");
+    CHECK(fbd_to_bool(g.nodes[w_idx].outputs[0]) == true,
+          "i2c_write_reg disabled (enable=false) -> outputs[0] = true (skip, bukan gagal) - kontras dgn test enabled yang outputs[0]==false");
+}
+
+static void test_i2c_write_burst_disabled_skips_bus_call(void)
+{
+    fbd_graph_t g;
+    fbd_graph_init(&g);
+
+    fbd_node_t *b = fbd_graph_add_node(&g, "b1", FBD_NODE_I2C_WRITE_BURST);
+    b->params.i2c_bus = 0;
+    b->params.i2c_address = 0x27;
+    b->params.i2c_burst_delay_us = 50;
+    b->params.i2c_burst_cmd_count = 3;
+    b->params.i2c_burst_cmds[0].reg = 0x00;
+    b->params.i2c_burst_cmds[0].data[0] = 0x38;
+    b->params.i2c_burst_cmds[0].data_len = 1;
+    b->params.i2c_burst_cmds[1].reg = 0x00;
+    b->params.i2c_burst_cmds[1].data[0] = 0x0C;
+    b->params.i2c_burst_cmds[1].data_len = 1;
+    b->params.i2c_burst_cmds[2].reg = 0x00;
+    b->params.i2c_burst_cmds[2].data[0] = 0x01;
+    b->params.i2c_burst_cmds[2].data_len = 1;
+
+    fbd_node_t *en = fbd_graph_add_node(&g, "en1", FBD_NODE_CONST);
+    en->params.const_value = fbd_make_bool(false);
+
+    fbd_graph_add_link(&g, "en1", 0, "b1", 0);
+
+    CHECK(fbd_graph_compile(&g), "compile() sukses untuk i2c_write_burst dengan enable=false");
+    fbd_graph_execute_cycle(&g, 0);
+
+    size_t b_idx = fbd_graph_find_node(&g, "b1");
+    CHECK(fbd_to_bool(g.nodes[b_idx].outputs[0]) == true,
+          "i2c_write_burst disabled (enable=false) -> outputs[0] = true, skip seluruh sequence (bukan gagal)");
+}
+
 /* ---- sys_var_get (6b) ---- */
 
 static fbd_value_t test_sys_var_provider(const char *name)
@@ -192,6 +281,9 @@ int main(void)
     test_i2c_read_reg_error_does_not_block_scan_cycle();
     test_i2c_write_reg_error();
     test_i2c_write_burst_error();
+    test_i2c_read_reg_disabled_skips_bus_call();
+    test_i2c_write_reg_disabled_skips_bus_call();
+    test_i2c_write_burst_disabled_skips_bus_call();
     test_sys_var_get_no_provider_registered();
     test_sys_var_get_wifi_rssi_compare();
     test_sys_var_get_unknown_name();

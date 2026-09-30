@@ -327,10 +327,25 @@ untuk device I2C dengan alamat nyata. Timeout wajib pendek (8ms, lihat
 `I2C_BRIDGE_TIMEOUT_MS`) — NACK/timeout tidak pernah menahan scan cycle
 lebih lama dari itu.
 
+Ketiganya (`i2c_read_reg`, `i2c_write_reg`, `i2c_write_burst`) punya satu
+input opsional di port 0: `enable` (bool). Tidak disambung = perilaku SAMA
+seperti sebelum fitur ini ada (selalu jalan tiap scan cycle) — kompatibel
+dengan program lama. Disambung dan bernilai `false` = node SKIP total
+operasi bus I2C cycle itu (tidak ada byte dikirim/dibaca). Nilai output
+saat di-skip SENGAJA dibedakan dari kegagalan bus asli:
+`i2c_write_reg`/`i2c_write_burst` mengembalikan `outputs[0]=true` (bukan
+gagal, cuma tidak dicoba), `i2c_read_reg` mengembalikan `outputs[1]`
+(error) `=false` dan `outputs[0]` bytes kosong (len 0). Kegunaan utama:
+gantian 2 node `i2c_write_burst` (masing-masing kirim konten LCD berbeda)
+dengan toggle boolean dari node Oscillator disambung ke `enable`
+masing-masing (terbalik satu sama lain lewat NOT), sehingga LCD berganti
+konten berkala tanpa merombak wiring lain — lihat contoh di subsection
+"I2C burst" di bawah.
+
 | `type` | `params` | Keterangan |
 |---|---|---|
-| `i2c_read_reg` | `{ "bus": 0, "address": 39, "register": 1, "length": 2 }` | `address`: 7-bit (contoh: `39` = `0x27`, alamat khas LCD1602 backpack PCF8574). `length`: 1-8. Output: `outputs[0]`=raw bytes (`FBD_BYTES`), `outputs[1]`=error (`bool`, `true` kalau NACK/timeout) |
-| `i2c_write_reg` | `{ "bus": 0, "address": 39, "register": 0, "data": [16, 32] }` | `data`: array 1-7 byte. Output: `outputs[0]`=sukses (`bool`) |
+| `i2c_read_reg` | `{ "bus": 0, "address": 39, "register": 1, "length": 2 }` | `address`: 7-bit (contoh: `39` = `0x27`, alamat khas LCD1602 backpack PCF8574). `length`: 1-8. Output: `outputs[0]`=raw bytes (`FBD_BYTES`), `outputs[1]`=error (`bool`, `true` kalau NACK/timeout). Input opsional `enable` di port 0 (bool) — lihat paragraf di atas. |
+| `i2c_write_reg` | `{ "bus": 0, "address": 39, "register": 0, "data": [16, 32] }` | `data`: array 1-7 byte. Output: `outputs[0]`=sukses (`bool`). Input opsional `enable` di port 0 (bool) — lihat paragraf di atas. |
 
 Contoh:
 ```json
@@ -350,7 +365,7 @@ lain juga.
 
 | `type` | `params` | Keterangan |
 |---|---|---|
-| `i2c_write_burst` | `{ "bus": 0, "address": 39, "delay_us": 50, "commands": [{ "register": 0, "data": [56] }, { "register": 0, "data": [12] }] }` | `commands`: array 1-8 objek `{register, data}`. Tiap `data`: array 1-4 byte. `delay_us`: jeda antar command (0 = tanpa delay). Output: `outputs[0]`=sukses (`bool`) — `false` kalau command manapun gagal (berhenti di command pertama yang NACK/timeout, sisa command TIDAK dicoba) |
+| `i2c_write_burst` | `{ "bus": 0, "address": 39, "delay_us": 50, "commands": [{ "register": 0, "data": [56] }, { "register": 0, "data": [12] }] }` | `commands`: array 1-8 objek `{register, data}`. Tiap `data`: array 1-4 byte. `delay_us`: jeda antar command (0 = tanpa delay). Output: `outputs[0]`=sukses (`bool`) — `false` kalau command manapun gagal (berhenti di command pertama yang NACK/timeout, sisa command TIDAK dicoba). Input opsional `enable` di port 0 (bool) — lihat paragraf di atas. |
 
 Batas: maksimal **8 command** per node, tiap command maksimal **4 byte**
 data. Kalau butuh command lebih banyak, sambung beberapa node
@@ -375,6 +390,35 @@ selalu cek datasheet/pinout PCF8574↔LCD board kamu):
   }
 }
 ```
+
+Contoh — 2 node `i2c_write_burst` gantian aktif lewat `enable` (satu tampil
+saat Oscillator ON, satu saat Oscillator OFF via NOT — dua LCD burst di
+address yang sama, TIDAK boleh dieksekusi bersamaan tiap cycle, tapi
+node inaktif tetap "sukses" bukan error):
+```json
+{
+  "nodes": [
+    { "id": "osc1", "type": "osc", "params": { "osc_on_ms": 2000, "osc_off_ms": 2000 } },
+    { "id": "not1", "type": "not", "params": {} },
+    { "id": "lcd_hello", "type": "i2c_write_burst",
+      "params": { "bus": 0, "address": 39, "delay_us": 50, "commands": [ { "register": 0, "data": [72] } ] } },
+    { "id": "lcd_ini", "type": "i2c_write_burst",
+      "params": { "bus": 0, "address": 39, "delay_us": 50, "commands": [ { "register": 0, "data": [73] } ] } }
+  ],
+  "links": [
+    { "from": { "node": "osc1", "port": 0 }, "to": { "node": "lcd_hello", "port": 0 } },
+    { "from": { "node": "osc1", "port": 0 }, "to": { "node": "not1", "port": 0 } },
+    { "from": { "node": "not1", "port": 0 }, "to": { "node": "lcd_ini", "port": 0 } }
+  ]
+}
+```
+Selama Oscillator ON, `lcd_hello` jalan (`enable=true`) dan `lcd_ini`
+di-skip (`enable=false`, `not1` membalikkan sinyal) — gantian setiap
+`osc_on_ms`/`osc_off_ms` tanpa dua node saling tumpang tindih menulis
+bus di cycle yang sama. Data byte di atas HANYA contoh minimal (bukan
+sequence HD44780 lengkap) — command sequence asli untuk teks LCD nyata
+harus disusun sesuai datasheet, lihat contoh `lcd_init` di atas sebagai
+titik awal.
 
 **Live monitor:** `outputs[0]`/`outputs[1]` tiap node (termasuk `raw_bytes`/
 `error` dari `i2c_read_reg`) muncul di field `"outputs"` pada response

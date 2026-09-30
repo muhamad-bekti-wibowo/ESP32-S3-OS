@@ -229,8 +229,8 @@ const NODE_TYPES = {
 
     // ---- I2C primitive (Level 2, register-level, BUKAN driver sensor) ----
     i2c_read_reg: {
-        label: 'I2C Read Reg', inputs: 0, outputs: 2, category: 'i2c', icon: 'i2c',
-        help: 'Baca register I2C mentah (bukan driver sensor spesifik). Output 0 = raw bytes, output 1 = error (true kalau NACK/timeout). Timeout selalu pendek (8ms), tidak pernah menahan scan cycle.',
+        label: 'I2C Read Reg', inputs: 1, outputs: 2, category: 'i2c', icon: 'i2c',
+        help: 'Baca register I2C mentah (bukan driver sensor spesifik). Output 0 = raw bytes, output 1 = error (true kalau NACK/timeout). Timeout selalu pendek (8ms), tidak pernah menahan scan cycle. Input 0 (opsional) = enable - kosong/tidak disambung berarti selalu baca tiap cycle (seperti sebelumnya); disambung dan false = SKIP baca cycle ini (error jadi false, bukan true, karena memang tidak dicoba).',
         fields: [
             { key: 'bus', label: 'Bus', type: 'number', default: 0 },
             { key: 'address', label: 'Address (7-bit)', type: 'number', default: 0x27 },
@@ -239,8 +239,8 @@ const NODE_TYPES = {
         ],
     },
     i2c_write_reg: {
-        label: 'I2C Write Reg', inputs: 0, outputs: 1, category: 'i2c', icon: 'i2c',
-        help: 'Tulis satu register I2C mentah. Output = sukses (true kalau ACK diterima). Isi Data sebagai daftar byte dipisah koma, misal "16,32". Untuk device yang butuh BANYAK command berurutan (mis. init LCD), pakai I2C Write Burst.',
+        label: 'I2C Write Reg', inputs: 1, outputs: 1, category: 'i2c', icon: 'i2c',
+        help: 'Tulis satu register I2C mentah. Output = sukses (true kalau ACK diterima). Isi Data sebagai daftar byte dipisah koma, misal "16,32". Untuk device yang butuh BANYAK command berurutan (mis. init LCD), pakai I2C Write Burst. Input 0 (opsional) = enable - kosong/tidak disambung berarti selalu tulis tiap cycle (seperti sebelumnya); disambung dan false = SKIP tulis cycle ini (output jadi true, bukan gagal, karena memang tidak dicoba).',
         fields: [
             { key: 'bus', label: 'Bus', type: 'number', default: 0 },
             { key: 'address', label: 'Address (7-bit)', type: 'number', default: 0x27 },
@@ -249,8 +249,8 @@ const NODE_TYPES = {
         ],
     },
     i2c_write_burst: {
-        label: 'I2C Write Burst', inputs: 0, outputs: 1, category: 'i2c', icon: 'i2c_burst',
-        help: 'Kirim BEBERAPA command register write berurutan dalam satu scan cycle - dipakai device yang butuh command sequence (mis. init LCD1602 lewat backpack PCF8574: nibble tinggi, nibble rendah, toggle bit E, delay). Tetap primitive generik, bukan driver LCD - susun sequence apa pun lewat daftar command di bawah. Berhenti di command pertama yang gagal (output = false). Maks 8 command per node, tiap command maks 4 byte data - sambung beberapa node kalau butuh lebih.',
+        label: 'I2C Write Burst', inputs: 1, outputs: 1, category: 'i2c', icon: 'i2c_burst',
+        help: 'Kirim BEBERAPA command register write berurutan dalam satu scan cycle - dipakai device yang butuh command sequence (mis. init LCD1602 lewat backpack PCF8574: nibble tinggi, nibble rendah, toggle bit E, delay). Tetap primitive generik, bukan driver LCD - susun sequence apa pun lewat daftar command di bawah. Berhenti di command pertama yang gagal (output = false). Maks 8 command per node, tiap command maks 4 byte data - sambung beberapa node kalau butuh lebih. Input 0 (opsional) = enable - kosong/tidak disambung berarti selalu jalan tiap cycle (seperti sebelumnya); disambung dan false = SKIP seluruh command sequence cycle ini (output jadi true) - dipakai misalnya utk gantian 2 node Write Burst tampilkan konten LCD berbeda lewat toggle dari node Oscillator.',
         fields: [
             { key: 'bus', label: 'Bus', type: 'number', default: 0 },
             { key: 'address', label: 'Address (7-bit)', type: 'number', default: 0x27 },
@@ -353,6 +353,9 @@ const INPUT_PORT_LABELS = {
     http_endpoint: ['response (kosong = pakai file statis)'],
     modbus_tcp_write: ['nilai yang ditulis'],
     modbus_slave_reg: ['nilai dibaca master (dari node lain)'],
+    i2c_read_reg: ['enable (kosong = selalu baca)'],
+    i2c_write_reg: ['enable (kosong = selalu tulis)'],
+    i2c_write_burst: ['enable (kosong = selalu jalan)'],
 };
 
 const OUTPUT_PORT_LABELS = {
