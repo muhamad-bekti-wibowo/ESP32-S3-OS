@@ -44,6 +44,8 @@ $graphDeps = @(
     "components\fbd_core\i2c_bridge_stub.c"
     "components\fbd_core\fbd_sys_vars.c"
     "components\fbd_core\http_endpoint_bridge_stub.c"
+    "components\fbd_core\modbus_tcp_bridge_stub.c"
+    "components\fbd_core\modbus_slave_bridge_stub.c"
 )
 
 Run-HostTest "fbd_graph_test" (@("test_host\fbd_graph_test.c") + $graphDeps) @("components\fbd_core\include")
@@ -56,3 +58,5 @@ Run-HostTest "fbd_json_test" (@("test_host\fbd_json_test.c") + $graphDeps + @(
 Run-HostTest "fbd_hw_test" (@("test_host\fbd_hw_test.c") + $graphDeps) @("components\fbd_core\include")
 
 Run-HostTest "fbd_i2c_test" (@("test_host\fbd_i2c_test.c") + $graphDeps) @("components\fbd_core\include")
+
+Run-HostTest "fbd_modbus_test" (@("test_host\fbd_modbus_test.c") + $graphDeps) @("components\fbd_core\include")

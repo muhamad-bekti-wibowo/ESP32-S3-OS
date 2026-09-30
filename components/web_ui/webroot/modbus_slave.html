@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<title>System &gt; Modbus Slave</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="network-page">
+
+<div class="network-card">
+  <h3>System &gt; Modbus Slave</h3>
+
+  <div class="properties-help">
+    Node "Modbus Slave Reg" di editor expose register ke master Modbus RTU
+    LUAR (SCADA/PLC dkk) lewat UART2/RS485 (pin TX=GPIO17, RX=GPIO16). Atur
+    Slave ID dan Baud Rate di bawah - satu bus RS485 dipakai bersama SEMUA
+    node modbus_slave_reg. <strong>Config baru baru aktif setelah device
+    reboot</strong> - UART driver diinstall sekali saat boot, sama seperti
+    alasan node HTTP Endpoint butuh reboot.
+  </div>
+
+  <div id="modbus-slave-status" class="properties-field">
+    <label>Config saat ini (tersimpan)</label>
+    <p id="modbus-slave-status-text" class="properties-empty">Memuat...</p>
+  </div>
+
+  <div class="properties-field">
+    <label for="ms-slave-id">Slave ID (1-247)</label>
+    <input type="number" id="ms-slave-id" min="1" max="247" placeholder="1">
+  </div>
+
+  <div class="properties-field">
+    <label for="ms-baud">Baud Rate</label>
+    <select id="ms-baud">
+      <option value="9600">9600</option>
+      <option value="19200">19200</option>
+      <option value="38400">38400</option>
+      <option value="57600">57600</option>
+      <option value="115200">115200</option>
+    </select>
+  </div>
+
+  <button onclick="saveModbusSlaveConfig()">Save Config</button>
+  <a href="/" class="network-back-link">&larr; Kembali ke editor</a>
+  <a href="/endpoints.html" class="network-back-link">System &gt; HTTP Endpoints &rarr;</a>
+  <p id="modbus-slave-save-status" class="properties-empty"></p>
+</div>
+
+<script>
+async function loadModbusSlaveStatus() {
+    try {
+        const res = await fetch('/api/modbus_slave_config');
+        const data = await res.json();
+        document.getElementById('modbus-slave-status-text').textContent =
+            `Slave ID ${data.slave_id}, Baud ${data.baud_rate}`;
+        document.getElementById('ms-slave-id').value = data.slave_id;
+        document.getElementById('ms-baud').value = data.baud_rate;
+    } catch (err) {
+        document.getElementById('modbus-slave-status-text').textContent = 'Gagal memuat status: ' + err.message;
+    }
+}
+
+async function saveModbusSlaveConfig() {
+    const slave_id = parseInt(document.getElementById('ms-slave-id').value, 10);
+    const baud_rate = parseInt(document.getElementById('ms-baud').value, 10);
+    const statusEl = document.getElementById('modbus-slave-save-status');
+
+    if (!slave_id || slave_id < 1 || slave_id > 247) {
+        statusEl.textContent = 'Slave ID harus angka 1-247';
+        statusEl.style.color = '#c00';
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/modbus_slave_config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ slave_id, baud_rate }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            statusEl.textContent = 'Gagal: ' + (data.message || res.statusText);
+            statusEl.style.color = '#c00';
+            return;
+        }
+        statusEl.textContent = data.message;
+        statusEl.style.color = '#080';
+    } catch (err) {
+        statusEl.textContent = 'Error: ' + err.message;
+        statusEl.style.color = '#c00';
+    }
+}
+
+loadModbusSlaveStatus();
+</script>
+</body>
+</html>

@@ -12,6 +12,7 @@
 #include "fbd_json.h"
 #include "wifi_mgr.h"
 #include "endpoint_mgr.h"
+#include "modbus_slave_mgr.h"
 #include "http_endpoint_bridge.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -776,6 +777,65 @@ static esp_err_t endpoints_config_post_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+/* ---- GET/POST /api/modbus_slave_config : slave_id + baud rate Modbus
+ * RTU slave (UART2/RS485, modbus_slave_mgr, NVS) - pola sama dengan
+ * /api/endpoints_config di atas. ---- */
+
+static esp_err_t modbus_slave_config_get_handler(httpd_req_t *req)
+{
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddNumberToObject(root, "slave_id", modbus_slave_mgr_get_slave_id());
+    cJSON_AddNumberToObject(root, "baud_rate", modbus_slave_mgr_get_baud_rate());
+    char *out = cJSON_PrintUnformatted(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, out);
+    free(out);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+static esp_err_t modbus_slave_config_post_handler(httpd_req_t *req)
+{
+    int total = req->content_len;
+    if (total <= 0 || total > 128) {
+        return send_json_error(req, "ukuran body tidak valid");
+    }
+    char buf[128];
+    int received = 0;
+    while (received < total) {
+        int r = httpd_req_recv(req, buf + received, total - received);
+        if (r <= 0) {
+            return send_json_error(req, "gagal membaca body");
+        }
+        received += r;
+    }
+    buf[total] = '\0';
+
+    cJSON *json = cJSON_Parse(buf);
+    if (!json) {
+        return send_json_error(req, "JSON tidak valid (parse error)");
+    }
+    const cJSON *slave_id = cJSON_GetObjectItem(json, "slave_id");
+    const cJSON *baud_rate = cJSON_GetObjectItem(json, "baud_rate");
+    if (!slave_id || !cJSON_IsNumber(slave_id) || slave_id->valuedouble < 1 || slave_id->valuedouble > 247) {
+        cJSON_Delete(json);
+        return send_json_error(req, "slave_id harus angka 1-247");
+    }
+    if (!baud_rate || !cJSON_IsNumber(baud_rate) || baud_rate->valuedouble < 300 || baud_rate->valuedouble > 921600) {
+        cJSON_Delete(json);
+        return send_json_error(req, "baud_rate tidak valid");
+    }
+    bool ok = modbus_slave_mgr_save_config((uint8_t)slave_id->valuedouble, (uint32_t)baud_rate->valuedouble);
+    cJSON_Delete(json);
+
+    if (!ok) {
+        return send_json_error(req, "gagal menyimpan config ke NVS");
+    }
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"ok\",\"message\":\"Config tersimpan. Reboot device untuk menerapkan.\"}");
+    return ESP_OK;
+}
+
 /* Daftarkan route HTTP kustom (node http_endpoint) di server httpd KEDUA,
  * dibaca dari graph aktif SAAT INI (dipanggil sekali setelah
  * load_program_file_at_startup(), sebelum server kedua di-start).
@@ -973,6 +1033,8 @@ void web_ui_start(logic_program_t *legacy_prog,
     httpd_uri_t endpoint_file_post_uri = { .uri = "/api/endpoint_file", .method = HTTP_POST, .handler = endpoint_file_post_handler };
     httpd_uri_t endpoints_config_get_uri = { .uri = "/api/endpoints_config", .method = HTTP_GET, .handler = endpoints_config_get_handler };
     httpd_uri_t endpoints_config_post_uri = { .uri = "/api/endpoints_config", .method = HTTP_POST, .handler = endpoints_config_post_handler };
+    httpd_uri_t modbus_slave_config_get_uri = { .uri = "/api/modbus_slave_config", .method = HTTP_GET, .handler = modbus_slave_config_get_handler };
+    httpd_uri_t modbus_slave_config_post_uri = { .uri = "/api/modbus_slave_config", .method = HTTP_POST, .handler = modbus_slave_config_post_handler };
     /* Wildcard, harus didaftarkan setelah /api/... supaya tidak menutupi -
      * httpd_uri_match_wildcard cocokkan URI paling spesifik dulu terlepas
      * urutan register, tapi tetap didaftarkan terakhir untuk kejelasan. */
@@ -988,6 +1050,8 @@ void web_ui_start(logic_program_t *legacy_prog,
     httpd_register_uri_handler(server, &endpoint_file_post_uri);
     httpd_register_uri_handler(server, &endpoints_config_get_uri);
     httpd_register_uri_handler(server, &endpoints_config_post_uri);
+    httpd_register_uri_handler(server, &modbus_slave_config_get_uri);
+    httpd_register_uri_handler(server, &modbus_slave_config_post_uri);
     httpd_register_uri_handler(server, &static_uri);
 
     ESP_LOGI(TAG, "web server siap");

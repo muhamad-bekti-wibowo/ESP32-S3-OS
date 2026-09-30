@@ -28,6 +28,7 @@ const CATEGORY_LABELS = {
     io_sensor: 'Sensor',
     i2c: 'I2C',
     system: 'System',
+    modbus: 'Modbus',
 };
 
 const NODE_TYPES = {
@@ -281,6 +282,44 @@ const NODE_TYPES = {
               options: ['text/html', 'text/plain'], default: 'text/html' },
         ],
     },
+
+    // ---- Modbus TCP client (ESP32 jadi master, baca device lain via WiFi/LAN) ----
+    modbus_tcp_read: {
+        label: 'Modbus TCP Read', inputs: 0, outputs: 2, category: 'modbus', icon: 'modbus',
+        help: 'Baca register/coil dari device Modbus TCP LAIN lewat WiFi/LAN (ESP32 jadi client/master) - alamat device diisi IP:Port (biasanya port 502). Request dikirim ke task background terpisah, TIDAK blocking scan cycle - output = hasil polling TERAKHIR (bisa beberapa scan cycle basi tergantung kecepatan respons device, BUKAN realtime per-cycle seperti I2C lokal). Output 1 = nilai register (count=1) atau raw bytes count x uint16 (count>1, pecah sendiri kalau perlu). Output 2 = error (true kalau request terakhir gagal/timeout ATAU belum pernah ada response). Count dibatasi maks 4 register per node (batas fbd_value_t) - butuh lebih, sambung beberapa node dengan address awal beda.',
+        fields: [
+            { key: 'ip', label: 'IP Address', type: 'text', default: '192.168.1.50' },
+            { key: 'port', label: 'Port', type: 'number', default: 502 },
+            { key: 'unit_id', label: 'Unit/Slave ID', type: 'number', default: 1 },
+            { key: 'reg_type', label: 'Register Type', type: 'select',
+              options: ['holding', 'input', 'coil', 'discrete'], default: 'holding' },
+            { key: 'address', label: 'Address', type: 'number', default: 0 },
+            { key: 'count', label: 'Count (1-4)', type: 'number', default: 1 },
+        ],
+    },
+    modbus_tcp_write: {
+        label: 'Modbus TCP Write', inputs: 1, outputs: 1, category: 'modbus', icon: 'modbus',
+        help: 'Tulis SATU register/coil ke device Modbus TCP lain (ESP32 jadi client/master) - kebalikan dari Modbus TCP Read. Input = nilai yang ditulis (coil: dianggap boolean, holding register: dibulatkan ke integer 16-bit). Sama seperti Read, async - output (sukses/gagal) adalah hasil request TERAKHIR, bukan konfirmasi instan tulisan kali ini. Reg Type holding/coil saja (input register/discrete input read-only di sisi device, tidak bisa ditulis).',
+        fields: [
+            { key: 'ip', label: 'IP Address', type: 'text', default: '192.168.1.50' },
+            { key: 'port', label: 'Port', type: 'number', default: 502 },
+            { key: 'unit_id', label: 'Unit/Slave ID', type: 'number', default: 1 },
+            { key: 'reg_type', label: 'Register Type', type: 'select',
+              options: ['holding', 'coil'], default: 'holding' },
+            { key: 'address', label: 'Address', type: 'number', default: 0 },
+        ],
+    },
+
+    // ---- Modbus RTU slave (ESP32 jadi server di UART2/RS485, diakses SCADA/PLC luar) ----
+    modbus_slave_reg: {
+        label: 'Modbus Slave Reg', inputs: 1, outputs: 1, category: 'modbus', icon: 'modbus',
+        help: 'Expose SATU register/coil ke master Modbus RTU LUAR (SCADA/PLC dkk) lewat UART2/RS485 - ESP32 jadi SLAVE (server) di sini, kebalikan dari Modbus TCP Read/Write. Slave ID dan baud rate diatur di tab System > Modbus Slave (satu bus RS485 dipakai bersama semua node ini). Input (kalau tersambung ke node lain, mis. Math) = nilai yang DIBACA master lewat FC03/FC01. Output = nilai TERAKHIR yang DITULIS master lewat FC06/FC05 (0/false kalau master belum pernah menulis) - dua arah ini TERPISAH, register bisa berfungsi baca-tulis dari KEDUA sisi (graph maupun master luar). Dua node dengan address+type sama akan bentrok (DITOLAK saat compile). PENTING: node baru/berubah BARU AKTIF SETELAH DEVICE REBOOT (UART driver diinstall sekali saat boot).',
+        fields: [
+            { key: 'address', label: 'Address', type: 'number', default: 0 },
+            { key: 'reg_type', label: 'Register Type', type: 'select',
+              options: ['holding', 'coil'], default: 'holding' },
+        ],
+    },
 };
 
 /* Label port input/output per tipe, dipakai sebagai tooltip (atribut
@@ -312,6 +351,8 @@ const INPUT_PORT_LABELS = {
     servo: ['sudut (0-180 derajat)'],
     ws2812: ['R (0-255)', 'G (0-255)', 'B (0-255)'],
     http_endpoint: ['response (kosong = pakai file statis)'],
+    modbus_tcp_write: ['nilai yang ditulis'],
+    modbus_slave_reg: ['nilai dibaca master (dari node lain)'],
 };
 
 const OUTPUT_PORT_LABELS = {
@@ -319,4 +360,7 @@ const OUTPUT_PORT_LABELS = {
     ctu: ['bool (count >= preset)', 'count (angka)'],
     ultrasonic: ['jarak (cm)', 'error'],
     http_endpoint: ['query A', 'query B'],
+    modbus_tcp_read: ['nilai/raw bytes', 'error'],
+    modbus_tcp_write: ['sukses (request terakhir)'],
+    modbus_slave_reg: ['nilai ditulis master'],
 };

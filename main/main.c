@@ -12,6 +12,9 @@
 #include "fbd_graph.h"
 #include "fbd_hw_backend.h"
 #include "fbd_sys_vars.h"
+#include "modbus_tcp_task.h"
+#include "modbus_slave_task.h"
+#include "modbus_slave_mgr.h"
 
 static const char *TAG = "app_main";
 
@@ -166,6 +169,51 @@ void app_main(void)
     web_ui_start(&s_legacy_program, &g_active_graph, &g_standby_graph, &g_reload_requested);
 
     xTaskCreatePinnedToCore(fbd_scan_task, "fbd_scan", 4096, NULL, 5, NULL, 1);
+
+    /* modbus_tcp_task selalu jalan (idle/vTaskDelay kalau tidak ada node
+     * modbus_tcp_read/write manapun - lihat modbus_tcp_task.h) - beda
+     * dari server httpd kedua yang HARUS dicegah start sama sekali kalau
+     * tidak dipakai (httpd listener konsumsi resource lebih berat
+     * daripada satu task idle biasa). */
+    modbus_tcp_task_start();
+
+    /* modbus_slave_task (UART2/RS485) HANYA start kalau ada minimal 1
+     * node modbus_slave_reg di graph default/tersimpan - hindari
+     * alokasi UART driver + pin GPIO17/16 sia-sia kalau device tidak
+     * dipakai sebagai Modbus slave sama sekali (pola sama dengan
+     * "server httpd kedua jangan selalu start" di web_ui.c).
+     *
+     * PENTING: cek g_standby_graph, BUKAN g_active_graph - web_ui_start()
+     * di atas memuat program.json (kalau ada) ke *standby_graph_ptr lalu
+     * cuma set g_reload_requested=true, TIDAK langsung swap. Swap
+     * sungguhan baru terjadi di iterasi PERTAMA fbd_scan_task (yang
+     * task-nya sendiri BELUM dibuat sampai baris di atas) - kalau graph
+     * loaded punya node modbus_slave_reg tapi cek ini pakai g_active_graph
+     * (masih default graph kosong dari build_default_graph()), task
+     * slave TIDAK PERNAH start walau user sudah save program dengan node
+     * itu. Bug persis yang sama pernah terjadi di http_endpoint - lihat
+     * riwayat commit fix "start_endpoint_server pakai standby, bukan
+     * active". */
+    bool has_modbus_slave_node = false;
+    for (size_t i = 0; i < g_standby_graph->node_count; ++i) {
+        if (g_standby_graph->nodes[i].type == FBD_NODE_MODBUS_SLAVE_REG) {
+            has_modbus_slave_node = true;
+            break;
+        }
+    }
+    if (!has_modbus_slave_node) {
+        for (size_t i = 0; i < g_active_graph->node_count; ++i) {
+            if (g_active_graph->nodes[i].type == FBD_NODE_MODBUS_SLAVE_REG) {
+                has_modbus_slave_node = true;
+                break;
+            }
+        }
+    }
+    if (has_modbus_slave_node) {
+        modbus_slave_task_start(modbus_slave_mgr_get_slave_id(), modbus_slave_mgr_get_baud_rate());
+    } else {
+        ESP_LOGI(TAG, "tidak ada node modbus_slave_reg, Modbus RTU slave tidak dijalankan");
+    }
 
     ESP_LOGI(TAG, "siap. Konek ke AP lalu buka http://192.168.4.1");
 }

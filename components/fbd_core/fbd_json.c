@@ -81,6 +81,9 @@ static const char *node_type_to_str(fbd_node_type_t type)
         case FBD_NODE_I2C_WRITE_BURST: return "i2c_write_burst";
         case FBD_NODE_SYS_VAR_GET:   return "sys_var_get";
         case FBD_NODE_HTTP_ENDPOINT: return "http_endpoint";
+        case FBD_NODE_MODBUS_TCP_READ:  return "modbus_tcp_read";
+        case FBD_NODE_MODBUS_TCP_WRITE: return "modbus_tcp_write";
+        case FBD_NODE_MODBUS_SLAVE_REG: return "modbus_slave_reg";
         default:                    return NULL;
     }
 }
@@ -168,6 +171,26 @@ static bool str_to_hw_mode(const char *s, fbd_hw_mode_t *out)
 {
     if (strcmp(s, "simulated") == 0) { *out = FBD_HW_SIMULATED; return true; }
     if (strcmp(s, "real") == 0)      { *out = FBD_HW_REAL;      return true; }
+    return false;
+}
+
+static const char *modbus_reg_type_to_str(fbd_modbus_reg_type_t type)
+{
+    switch (type) {
+        case FBD_MODBUS_REG_HOLDING:  return "holding";
+        case FBD_MODBUS_REG_INPUT:    return "input";
+        case FBD_MODBUS_REG_COIL:     return "coil";
+        case FBD_MODBUS_REG_DISCRETE: return "discrete";
+        default:                      return "holding";
+    }
+}
+
+static bool str_to_modbus_reg_type(const char *s, fbd_modbus_reg_type_t *out)
+{
+    if (strcmp(s, "holding") == 0)  { *out = FBD_MODBUS_REG_HOLDING;  return true; }
+    if (strcmp(s, "input") == 0)    { *out = FBD_MODBUS_REG_INPUT;    return true; }
+    if (strcmp(s, "coil") == 0)     { *out = FBD_MODBUS_REG_COIL;     return true; }
+    if (strcmp(s, "discrete") == 0) { *out = FBD_MODBUS_REG_DISCRETE; return true; }
     return false;
 }
 
@@ -575,6 +598,63 @@ static bool parse_params(const cJSON *params, fbd_node_t *node, char *err, size_
             }
             break;
         }
+        case FBD_NODE_MODBUS_TCP_READ:
+        case FBD_NODE_MODBUS_TCP_WRITE: {
+            const cJSON *ip = cJSON_GetObjectItem(params, "ip");
+            const cJSON *port = cJSON_GetObjectItem(params, "port");
+            const cJSON *unit_id = cJSON_GetObjectItem(params, "unit_id");
+            const cJSON *reg_type = cJSON_GetObjectItem(params, "reg_type");
+            const cJSON *address = cJSON_GetObjectItem(params, "address");
+            if (!cJSON_IsString(ip) || !cJSON_IsNumber(port) || !cJSON_IsNumber(unit_id) ||
+                !cJSON_IsString(reg_type) || !cJSON_IsNumber(address)) {
+                set_err(err, err_len, "modbus_tcp: params.ip/port/unit_id/reg_type/address wajib");
+                return false;
+            }
+            if (!str_to_modbus_reg_type(reg_type->valuestring, &node->params.modbus_reg_type)) {
+                set_err(err, err_len, "modbus_tcp: params.reg_type tidak valid (holding/input/coil/discrete)");
+                return false;
+            }
+            strncpy(node->params.modbus_ip, ip->valuestring, sizeof(node->params.modbus_ip) - 1);
+            node->params.modbus_ip[sizeof(node->params.modbus_ip) - 1] = '\0';
+            node->params.modbus_port = (uint16_t)port->valuedouble;
+            node->params.modbus_unit_id = (uint8_t)unit_id->valuedouble;
+            node->params.modbus_address = (uint16_t)address->valuedouble;
+            if (node->type == FBD_NODE_MODBUS_TCP_READ) {
+                const cJSON *count = cJSON_GetObjectItem(params, "count");
+                if (!cJSON_IsNumber(count) || count->valuedouble < 1 || count->valuedouble > FBD_MODBUS_MAX_COUNT) {
+                    set_err(err, err_len, "modbus_tcp_read: params.count wajib 1-4");
+                    return false;
+                }
+                node->params.modbus_count = (uint8_t)count->valuedouble;
+            } else {
+                if (node->params.modbus_reg_type != FBD_MODBUS_REG_HOLDING &&
+                    node->params.modbus_reg_type != FBD_MODBUS_REG_COIL) {
+                    set_err(err, err_len, "modbus_tcp_write: reg_type harus holding/coil (input/discrete read-only)");
+                    return false;
+                }
+                node->params.modbus_count = 1;
+            }
+            break;
+        }
+        case FBD_NODE_MODBUS_SLAVE_REG: {
+            const cJSON *address = cJSON_GetObjectItem(params, "address");
+            const cJSON *reg_type = cJSON_GetObjectItem(params, "reg_type");
+            if (!cJSON_IsNumber(address) || !cJSON_IsString(reg_type)) {
+                set_err(err, err_len, "modbus_slave_reg: params.address/reg_type wajib");
+                return false;
+            }
+            if (!str_to_modbus_reg_type(reg_type->valuestring, &node->params.modbus_slave_reg_type)) {
+                set_err(err, err_len, "modbus_slave_reg: params.reg_type tidak valid");
+                return false;
+            }
+            if (node->params.modbus_slave_reg_type != FBD_MODBUS_REG_HOLDING &&
+                node->params.modbus_slave_reg_type != FBD_MODBUS_REG_COIL) {
+                set_err(err, err_len, "modbus_slave_reg: reg_type harus holding/coil (slave hanya expose register read-write)");
+                return false;
+            }
+            node->params.modbus_slave_address = (uint16_t)address->valuedouble;
+            break;
+        }
         case FBD_NODE_AND:
         case FBD_NODE_OR:
         case FBD_NODE_NOT:
@@ -850,6 +930,21 @@ static cJSON *serialize_params(const fbd_node_t *node)
             cJSON_AddStringToObject(params, "content_type", node->params.http_content_type_html ? "text/html" : "text/plain");
             cJSON_AddStringToObject(params, "query_a_name", node->params.http_query_a_name);
             cJSON_AddStringToObject(params, "query_b_name", node->params.http_query_b_name);
+            break;
+        case FBD_NODE_MODBUS_TCP_READ:
+        case FBD_NODE_MODBUS_TCP_WRITE:
+            cJSON_AddStringToObject(params, "ip", node->params.modbus_ip);
+            cJSON_AddNumberToObject(params, "port", node->params.modbus_port);
+            cJSON_AddNumberToObject(params, "unit_id", node->params.modbus_unit_id);
+            cJSON_AddStringToObject(params, "reg_type", modbus_reg_type_to_str(node->params.modbus_reg_type));
+            cJSON_AddNumberToObject(params, "address", node->params.modbus_address);
+            if (node->type == FBD_NODE_MODBUS_TCP_READ) {
+                cJSON_AddNumberToObject(params, "count", node->params.modbus_count);
+            }
+            break;
+        case FBD_NODE_MODBUS_SLAVE_REG:
+            cJSON_AddNumberToObject(params, "address", node->params.modbus_slave_address);
+            cJSON_AddStringToObject(params, "reg_type", modbus_reg_type_to_str(node->params.modbus_slave_reg_type));
             break;
         default:
             break;

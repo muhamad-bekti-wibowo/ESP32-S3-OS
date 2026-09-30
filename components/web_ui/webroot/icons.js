@@ -26,6 +26,7 @@ const NODE_ICONS = {
     i2c_burst:  '<rect x="3" y="4" width="8" height="16" rx="1"/><path d="M15 6h6M15 10h6M15 14h6M15 18h6"/>',
     sys:        '<circle cx="11" cy="11" r="7"/><path d="M11 4v14M4 11h14"/>',
     http:       '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/><path d="M7 13h4M7 16h6"/>',
+    modbus:     '<rect x="2" y="8" width="7" height="8" rx="1"/><rect x="15" y="8" width="7" height="8" rx="1"/><path d="M9 12h6"/><path d="M11 9l2 3-2 3"/>',
     trash:      '<path d="M4 6h16"/><path d="M9 6V4h6v2"/><path d="M6 6l1 14h10l1-14"/><path d="M10 10v6M14 10v6"/>',
     default:    '<rect x="4" y="4" width="14" height="14" rx="2"/>',
 };

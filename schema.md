@@ -483,6 +483,100 @@ Contoh — endpoint kalkulator dinamis (`/add?a=3&b=4` → balas `"7"`):
 Setelah reboot, akses `http://<ip-device>:<port>/add?a=3&b=4` akan
 membalas `7` (dihitung live tiap request, lewat scan cycle terkini).
 
+### Modbus TCP client (Level 2, ESP32 jadi master via WiFi/LAN)
+
+Baca/tulis register/coil dari device Modbus TCP **lain** di jaringan
+(alamat `IP:Port`, biasanya port 502) — ESP32 di sini jadi **client/
+master**. Hand-rolled langsung di atas BSD socket (lwip), TIDAK memakai
+vendor library `esp-modbus` — konsisten dengan filosofi primitive kecil
+project ini (I2C/ultrasonic juga hand-rolled).
+
+**Async, TIDAK blocking scan cycle** — koneksi/response time device
+remote lewat WiFi/LAN tidak bisa dijamin cepat seperti I2C lokal
+(selalu <8ms). Request dikirim ke task background terpisah
+(`modbus_tcp_task`, jalan selamanya sejak boot, idle kalau tidak ada
+request), `evaluate_node()` tiap scan cycle cuma **membaca hasil
+TERAKHIR** yang sudah ada — nilainya "hasil polling terakhir", bisa
+beberapa scan cycle basi tergantung kecepatan respons device, BUKAN
+realtime per-cycle. Trade-off ini disengaja demi keamanan scan cycle:
+satu device Modbus lambat/network putus tidak akan menunda node lain
+di graph.
+
+| `type` | `params` | Keterangan |
+|---|---|---|
+| `modbus_tcp_read` | `{ "ip": "192.168.1.50", "port": 502, "unit_id": 1, "reg_type": "holding", "address": 0, "count": 1 }` | `reg_type`: `holding`/`input`/`coil`/`discrete`. `count`: 1-4 (batas `fbd_value_t` 8 byte = 4x uint16 — butuh lebih, sambung node lain dengan address awal beda). Output 1 = nilai (count=1, integer) atau raw bytes count x uint16 little-endian (count>1). Output 2 = error (true kalau request terakhir gagal/timeout ATAU belum pernah ada response). Tidak punya input. |
+| `modbus_tcp_write` | `{ "ip": "192.168.1.50", "port": 502, "unit_id": 1, "reg_type": "holding", "address": 0 }` | `reg_type`: `holding`/`coil` saja (input register/discrete input read-only di device). Input = nilai yang ditulis (coil: boolean, holding: integer 16-bit). Output = sukses/gagal REQUEST TERAKHIR (async, bukan konfirmasi instan tulisan kali ini). |
+
+Contoh — baca holding register 100 dari PLC lain, nyalakan LED kalau > 50:
+```json
+{
+  "nodes": [
+    { "id": "mb1", "type": "modbus_tcp_read",
+      "params": { "ip": "192.168.1.50", "port": 502, "unit_id": 1, "reg_type": "holding", "address": 100, "count": 1 } },
+    { "id": "th1", "type": "const", "params": { "datatype": "int32", "value": 50 } },
+    { "id": "cmp1", "type": "compare", "params": { "op": "gt" } },
+    { "id": "out1", "type": "digital_output", "params": { "pin": 2, "hw_mode": "real" } }
+  ],
+  "links": [
+    { "from": { "node": "mb1", "port": 0 }, "to": { "node": "cmp1", "port": 0 } },
+    { "from": { "node": "th1", "port": 0 }, "to": { "node": "cmp1", "port": 1 } },
+    { "from": { "node": "cmp1", "port": 0 }, "to": { "node": "out1", "port": 0 } }
+  ]
+}
+```
+
+### Modbus RTU slave (Level 2, ESP32 jadi server via UART2/RS485)
+
+ESP32 di sini jadi **slave (server)** — master Modbus RTU eksternal
+(SCADA/PLC dkk) yang inisiasi request lewat RS485, firmware ini cuma
+merespons. Pin UART2 fixed: TX=GPIO17, RX=GPIO16 (RS485 TTL module,
+mis. MAX485). Slave ID dan baud rate diatur global di tab
+**System > Modbus Slave** (satu bus RS485 dipakai bersama SEMUA node
+`modbus_slave_reg`), bukan per-node.
+
+Node `modbus_slave_reg` expose **SATU** alamat register/coil. Dua arah
+TERPISAH (mirip pola `http_endpoint`, tapi dua nilai berbeda bukan satu):
+- **Input** (kalau tersambung ke node lain) → nilai yang **DIBACA**
+  master lewat FC03 (holding)/FC01 (coil).
+- **Output** → nilai TERAKHIR yang **DITULIS** master lewat FC06
+  (holding)/FC05 (coil). 0/false kalau master belum pernah menulis.
+
+Register bisa berfungsi baca-tulis dari KEDUA sisi (graph maupun
+master luar) karena dua arah ini independen — bukan read-only atau
+write-only kaku. Dua node dengan `address`+`reg_type` sama akan
+bentrok secara logis (mengekspos slot bridge yang sama) — hindari.
+
+| `type` | `params` | Keterangan |
+|---|---|---|
+| `modbus_slave_reg` | `{ "address": 100, "reg_type": "holding" }` | `reg_type`: `holding`/`coil` saja. |
+
+**PENTING — wajib reboot:** sama seperti `http_endpoint`, UART driver
+diinstall sekali saat boot (juga cuma di-start SAMA SEKALI kalau ada
+minimal 1 node `modbus_slave_reg` di graph — hindari alokasi GPIO17/16
+sia-sia kalau tidak dipakai). Menambah/mengubah node atau config Slave
+ID/Baud lalu Save **tidak langsung aktif** — device harus di-reboot
+manual.
+
+Contoh — expose hasil Math (jumlah dua sensor) ke register holding 200:
+```json
+{
+  "nodes": [
+    { "id": "s1", "type": "analog_input", "params": { "pin": 1, "hw_mode": "real" } },
+    { "id": "s2", "type": "analog_input", "params": { "pin": 2, "hw_mode": "real" } },
+    { "id": "sum1", "type": "math", "params": { "op": "add" } },
+    { "id": "slv1", "type": "modbus_slave_reg", "params": { "address": 200, "reg_type": "holding" } }
+  ],
+  "links": [
+    { "from": { "node": "s1", "port": 0 }, "to": { "node": "sum1", "port": 0 } },
+    { "from": { "node": "s2", "port": 0 }, "to": { "node": "sum1", "port": 1 } },
+    { "from": { "node": "sum1", "port": 0 }, "to": { "node": "slv1", "port": 0 } }
+  ]
+}
+```
+Setelah reboot, master SCADA/PLC yang baca holding register 200 lewat
+RS485 (FC03) akan mendapat jumlah kedua sensor analog, diperbarui tiap
+scan cycle.
+
 ## Contoh document lengkap (dari plan.md §7.1)
 
 ```json

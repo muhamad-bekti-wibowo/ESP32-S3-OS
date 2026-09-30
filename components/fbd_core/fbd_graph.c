@@ -3,6 +3,8 @@
 #include "i2c_bridge.h"
 #include "fbd_sys_vars.h"
 #include "http_endpoint_bridge.h"
+#include "modbus_tcp_bridge.h"
+#include "modbus_slave_bridge.h"
 #include <string.h>
 
 void fbd_graph_init(fbd_graph_t *g)
@@ -376,6 +378,96 @@ static fbd_value_t evaluate_node(fbd_node_t *node, fbd_var_store_t *vars, uint32
                 http_endpoint_bridge_set_response(node->params.http_path, 0.0f, false);
             }
             return fbd_make_float(query_a);
+        }
+        case FBD_NODE_MODBUS_TCP_READ: {
+            /* Non-blocking dari sisi scan cycle - lihat komentar lengkap
+             * kenapa di modbus_tcp_bridge.h. Kirim "permintaan" ke bridge
+             * (task modbus_tcp_task di main.c yang benar-benar buka
+             * socket), baca hasil TERAKHIR yang sudah ada (mungkin dari
+             * request beberapa cycle sebelumnya - trade-off disengaja).
+             *
+             * outputs[0]: count==1 -> nilai register/coil tunggal
+             * (FBD_INT32, konsisten dgn tipe integer Modbus, bukan
+             * float), count>1 -> FBD_BYTES berisi count x uint16
+             * little-endian mentah (caller pecah sendiri kalau perlu).
+             * outputs[1]: error (true kalau request TERAKHIR gagal ATAU
+             * belum pernah ada response sama sekali). */
+            char key[MODBUS_TCP_BRIDGE_KEY_LEN];
+            uint8_t count = node->params.modbus_count;
+            if (count < 1) count = 1;
+            if (count > FBD_MODBUS_MAX_COUNT) count = FBD_MODBUS_MAX_COUNT;
+            modbus_tcp_bridge_make_key(key, node->params.modbus_ip, node->params.modbus_port,
+                                        node->params.modbus_unit_id, node->params.modbus_reg_type,
+                                        node->params.modbus_address, count);
+            modbus_tcp_bridge_request_read(key, node->params.modbus_ip, node->params.modbus_port,
+                                            node->params.modbus_unit_id, node->params.modbus_reg_type,
+                                            node->params.modbus_address, count);
+            modbus_tcp_bridge_result_t res = modbus_tcp_bridge_get_result(key);
+            *out_secondary = fbd_make_bool(!res.ok || !res.ever_ran);
+            if (count == 1) {
+                return fbd_make_int(res.values[0]);
+            }
+            uint8_t bytes[FBD_MODBUS_MAX_COUNT * 2];
+            for (uint8_t i = 0; i < count; ++i) {
+                bytes[i * 2] = (uint8_t)(res.values[i] & 0xFF);
+                bytes[i * 2 + 1] = (uint8_t)(res.values[i] >> 8);
+            }
+            return fbd_make_bytes(bytes, count * 2);
+        }
+        case FBD_NODE_MODBUS_TCP_WRITE: {
+            /* inputs[0] = nilai yang ditulis (holding register: dibulatkan
+             * ke uint16 dari fbd_to_float/int; coil: fbd_to_bool). Sama
+             * pola non-blocking seperti modbus_tcp_read - outputs[0] =
+             * true kalau request TERAKHIR (bukan tulisan ini persis,
+             * karena async) sukses. */
+            char key[MODBUS_TCP_BRIDGE_KEY_LEN];
+            bool is_coil = (node->params.modbus_reg_type == FBD_MODBUS_REG_COIL);
+            uint16_t write_value;
+            bool write_coil = false;
+            if (is_coil) {
+                write_coil = fbd_to_bool(in[0]);
+                write_value = write_coil ? 1 : 0;
+            } else {
+                write_value = (uint16_t)fbd_to_float(in[0]);
+            }
+            modbus_tcp_bridge_make_key(key, node->params.modbus_ip, node->params.modbus_port,
+                                        node->params.modbus_unit_id, node->params.modbus_reg_type,
+                                        node->params.modbus_address, 1);
+            modbus_tcp_bridge_request_write(key, node->params.modbus_ip, node->params.modbus_port,
+                                             node->params.modbus_unit_id, node->params.modbus_reg_type,
+                                             node->params.modbus_address, write_value, write_coil);
+            modbus_tcp_bridge_result_t res = modbus_tcp_bridge_get_result(key);
+            return fbd_make_bool(res.ok);
+        }
+        case FBD_NODE_MODBUS_SLAVE_REG: {
+            /* ESP32 jadi SLAVE Modbus RTU (UART2/RS485) - node ini expose
+             * 1 alamat register ke master eksternal (SCADA/PLC dkk).
+             * Lihat modbus_slave_bridge.h untuk kenapa state runtime-nya
+             * terpisah dari fbd_node_state_t (pola sama http_endpoint).
+             *
+             * inputs[0] (kalau tersambung) -> ditulis ke bridge jadi
+             * nilai yang DIBACA master lewat RS485.
+             * outputs[0] = nilai TERAKHIR yang DITULIS master lewat
+             * RS485 (0 kalau master belum pernah menulis). */
+            char key[MODBUS_SLAVE_BRIDGE_KEY_LEN];
+            bool is_coil = (node->params.modbus_slave_reg_type == FBD_MODBUS_REG_COIL);
+            modbus_slave_bridge_make_key(key, node->params.modbus_slave_reg_type,
+                                          node->params.modbus_slave_address);
+            modbus_slave_bridge_mark_active(key);
+            if (in[0].type != FBD_EMPTY) {
+                /* inputs[0] tersambung ke node lain - graph "mendorong"
+                 * nilai ke register, master baca nilai ini lewat RS485. */
+                uint16_t value = is_coil ? (fbd_to_bool(in[0]) ? 1 : 0) : (uint16_t)fbd_to_float(in[0]);
+                modbus_slave_bridge_set_to_master(key, value);
+            }
+            /* outputs[0] SELALU nilai TERAKHIR yang ditulis master (0
+             * kalau belum pernah) - terpisah dari to_master, lihat
+             * komentar dua-arah di modbus_slave_bridge.h. */
+            uint16_t from_master = modbus_slave_bridge_get_from_master(key);
+            if (is_coil) {
+                return fbd_make_bool(from_master != 0);
+            }
+            return fbd_make_int(from_master);
         }
         default:
             return fbd_make_empty();

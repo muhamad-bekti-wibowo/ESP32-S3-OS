@@ -50,8 +50,21 @@ typedef enum {
     FBD_NODE_I2C_WRITE_BURST,
     FBD_NODE_SYS_VAR_GET,
     FBD_NODE_HTTP_ENDPOINT,
+    FBD_NODE_MODBUS_TCP_READ,
+    FBD_NODE_MODBUS_TCP_WRITE,
+    FBD_NODE_MODBUS_SLAVE_REG,
     FBD_NODE_TYPE_COUNT
 } fbd_node_type_t;
+
+/* FBD_NODE_MODBUS_TCP_READ/WRITE: register_type request - dipetakan ke
+ * function code Modbus standar (FC03/04 baca, FC06/16 tulis holding;
+ * FC01/05 baca-tulis coil; FC02 baca discrete input). */
+typedef enum {
+    FBD_MODBUS_REG_HOLDING = 0,
+    FBD_MODBUS_REG_INPUT,
+    FBD_MODBUS_REG_COIL,
+    FBD_MODBUS_REG_DISCRETE
+} fbd_modbus_reg_type_t;
 
 typedef enum {
     FBD_PIN_MODE_PULLUP = 0,
@@ -135,7 +148,38 @@ typedef struct {
     bool http_content_type_html;        /* true="text/html", false="text/plain" - berlaku utk file statis MAUPUN response dinamis dari inputs[0] */
     char http_query_a_name[16];          /* nama query string utk outputs[0], mis. "a" (kosong = outputs[0] selalu 0) */
     char http_query_b_name[16];          /* nama query string utk outputs[1], mis. "b" */
+
+    /* FBD_NODE_MODBUS_TCP_READ/WRITE: request Modbus TCP ke device LAIN
+     * (ESP32 jadi client/master). TIDAK BOLEH blocking network I/O
+     * langsung di evaluate_node() (koneksi/response time device remote
+     * tidak bisa dijamin cepat seperti I2C lokal) - request dikirim ke
+     * task terpisah (modbus_tcp_bridge.h), scan cycle cuma baca hasil
+     * TERAKHIR yang sudah ada di bridge (lihat komentar lengkap di
+     * modbus_tcp_bridge.h, pola sama seperti http_endpoint_bridge.h). */
+    char modbus_ip[16];                  /* alamat IPv4 dotted-string device target, mis. "192.168.1.50" */
+    uint16_t modbus_port;                /* default 502 (port standar Modbus TCP) */
+    uint8_t modbus_unit_id;              /* unit/slave id di dalam device (banyak device abaikan, isi 1) */
+    fbd_modbus_reg_type_t modbus_reg_type; /* holding/input/coil/discrete */
+    uint16_t modbus_address;             /* alamat register/coil awal (0-based) */
+    uint8_t modbus_count;                /* jumlah register/coil dibaca (READ saja), maks FBD_MODBUS_MAX_COUNT */
+    uint32_t modbus_poll_interval_ms;    /* jarak minimal antar request baru ke device ini (hindari flood LAN), 0 = tiap scan cycle coba request baru kalau bridge idle */
+
+    /* FBD_NODE_MODBUS_SLAVE_REG: ESP32 jadi SLAVE Modbus RTU (server) di
+     * UART2/RS485 - node ini expose 1 alamat register ke master luar
+     * (SCADA/PLC dkk). Konfigurasi port serial (baud/slave_id) global,
+     * diatur di tab System > Modbus Slave (mirip System > HTTP
+     * Endpoints), BUKAN per-node, karena satu device cuma punya 1 bus
+     * RS485 - lihat modbus_slave_bridge.h. */
+    uint16_t modbus_slave_address;       /* alamat register/coil yang diexpose node ini */
+    fbd_modbus_reg_type_t modbus_slave_reg_type; /* holding atau coil saja (read-write dari sisi master) */
 } fbd_node_params_t;
+
+/* FBD_NODE_MODBUS_TCP_READ: dibatasi 4 register/coil per node (fbd_value_t
+ * FBD_BYTES maksimal 8 byte = 4x uint16) - konsisten filosofi primitive
+ * kecil project ini (I2C juga dibatasi FBD_BYTES 8 byte). Butuh lebih
+ * banyak? Sambung beberapa node modbus_tcp_read dengan address awal
+ * beda-beda. */
+#define FBD_MODBUS_MAX_COUNT 4
 
 typedef struct {
     fbd_timer_state_t timer;
