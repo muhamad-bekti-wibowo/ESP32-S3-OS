@@ -172,7 +172,14 @@ h3 {
 /* ---- Panel properties kanan ---- */
 
 #properties {
-    width: 240px;
+    /* 240px sebelumnya terlalu sempit untuk field command-list
+     * (i2c_write_burst.commands): label #N (18px) + kotak reg (52px) +
+     * gap + tombol hapus (22px) menyisakan nyaris 0px untuk kotak data
+     * (flex:1, min-width:0) - datanya TETAP tersimpan benar (value
+     * attribute tidak hilang), tapi visualnya kepencet nyaris tak
+     * terlihat, membuat command-list terlihat "kosong/0" padahal bukan.
+     * 320px cukup lega untuk semua kombinasi field yang ada sekarang. */
+    width: 320px;
     background: var(--panel-bg);
     margin: 16px 16px 16px 0;
     padding: 18px 16px;
@@ -329,8 +336,18 @@ h3 {
     flex-shrink: 0;
 }
 
+/* .properties-field input { width: 100% } (aturan generik untuk field
+ * biasa) punya specificity LEBIH TINGGI (class+tag = 0-1-1) daripada
+ * .command-reg/.command-data saja (class saja = 0-1-0) - tanpa
+ * "width: auto !important" di sini, width:100% generik itu MENANG,
+ * membuat command-reg dan command-data sama-sama coba isi 100% lebar
+ * row (row-nya display:flex), bikin keduanya berebut/collapse - inilah
+ * kenapa kotak data terlihat "kosong/0" padahal value-nya sebenarnya
+ * ada, cuma visualnya kepencet. !important di sini SENGAJA dipakai
+ * untuk menang lawan aturan generik itu (bukan practice yang mau
+ * diulang di tempat lain, cuma exception khusus command-list). */
 .command-reg {
-    width: 52px;
+    width: 52px !important;
     flex-shrink: 0;
     box-sizing: border-box;
     font-family: inherit;
@@ -343,6 +360,7 @@ h3 {
 }
 
 .command-data {
+    width: auto !important;
     flex: 1;
     min-width: 0;
     box-sizing: border-box;
