@@ -16,12 +16,25 @@
   </div>
 
   <div class="properties-field">
+    <label for="net-mode">Mode WiFi</label>
+    <select id="net-mode">
+      <option value="apsta">AP + STA (AP dan koneksi jaringan bersamaan)</option>
+      <option value="ap">AP saja (perangkat jadi hotspot sendiri)</option>
+      <option value="sta">STA saja (hanya konek ke jaringan)</option>
+      <option value="auto">Auto (STA dulu, AP menyala jika STA gagal 15 detik)</option>
+    </select>
+    <p class="properties-empty">Mode STA saja: perangkat hanya bisa dibuka lewat IP
+    jaringannya. Kalau SSID/password salah, perangkat tidak terjangkau &mdash; tahan
+    tombol BOOT (GPIO0) 5 detik untuk mereset config WiFi. Berlaku setelah reboot.</p>
+  </div>
+  <div class="properties-field">
     <label for="net-ssid">SSID</label>
     <input type="text" id="net-ssid" placeholder="Nama WiFi">
   </div>
   <div class="properties-field">
-    <label for="net-password">Password (kosongkan kalau open network)</label>
+    <label for="net-password">Password (kosong = tidak diubah)</label>
     <input type="password" id="net-password" placeholder="Password baru">
+    <label><input type="checkbox" id="net-clear-pass"> Hapus password (jaringan open)</label>
   </div>
   <div class="properties-field">
     <label for="net-hostname">Hostname (mDNS)</label>
@@ -45,6 +58,7 @@ async function loadNetworkStatus() {
             (data.connected ? ` (RSSI ${data.rssi} dBm, IP ${data.ip})` : '');
         document.getElementById('net-ssid').value = data.ssid;
         document.getElementById('net-hostname').value = data.hostname;
+        if (data.mode) document.getElementById('net-mode').value = data.mode;
     } catch (err) {
         document.getElementById('network-status-text').textContent = 'Gagal memuat status: ' + err.message;
     }
@@ -54,13 +68,22 @@ async function saveNetworkConfig() {
     const ssid = document.getElementById('net-ssid').value;
     const password = document.getElementById('net-password').value;
     const hostname = document.getElementById('net-hostname').value;
+    const mode = document.getElementById('net-mode').value;
+    const clearPass = document.getElementById('net-clear-pass').checked;
     const statusEl = document.getElementById('network-save-status');
+
+    /* password dikirim hanya kalau diisi, atau kalau "Hapus password"
+     * dicentang (jaringan open) - kalau tidak, server membiarkan password
+     * tersimpan apa adanya (sebelumnya password kosong menimpa yang lama). */
+    const body = { ssid, hostname, mode };
+    if (clearPass) body.password = '';
+    else if (password) body.password = password;
 
     try {
         const res = await fetch('/api/network', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ssid, password, hostname }),
+            body: JSON.stringify(body),
         });
         const data = await res.json();
         if (!res.ok) {

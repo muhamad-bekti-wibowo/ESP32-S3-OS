@@ -15,6 +15,7 @@
 #include "modbus_tcp_task.h"
 #include "modbus_slave_task.h"
 #include "modbus_slave_mgr.h"
+#include "sys_reset.h"
 
 static const char *TAG = "app_main";
 
@@ -165,8 +166,12 @@ void app_main(void)
     fbd_hw_set_backend(fbd_hw_real_backend());
     fbd_sys_vars_set_provider(sys_var_provider);
 
-    wifi_mgr_start_apsta();
+    wifi_mgr_start();
     web_ui_start(&s_legacy_program, &g_active_graph, &g_standby_graph, &g_reload_requested);
+
+    /* Tombol reset (BOOT 5 detik) + LED GPIO48 - HARUS sebelum fbd_scan_task:
+     * menginisialisasi channel RMT pin 48 lebih dulu, lihat sys_reset.h. */
+    sys_reset_start();
 
     xTaskCreatePinnedToCore(fbd_scan_task, "fbd_scan", 4096, NULL, 5, NULL, 1);
 

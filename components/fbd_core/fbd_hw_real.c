@@ -308,7 +308,13 @@ static void real_ws2812_init(int pin, int count)
     s_ws2812_pin_count++;
 }
 
-static void real_ws2812_write(int pin, int count, uint8_t r, uint8_t g, uint8_t b)
+/* Pin WS2812 yang sedang "dipinjam" firmware untuk umpan balik sistem
+ * (mis. LED reset di GPIO48, lihat main/sys_reset.c): tulisan dari graph
+ * (node ws2812 pengguna di pin yang sama) DIABAIKAN selama override aktif,
+ * supaya kedipan umpan balik tidak tertimpa tiap scan cycle 20ms. -1 = mati. */
+static volatile int s_ws2812_override_pin = -1;
+
+static void ws2812_write_impl(int pin, int count, uint8_t r, uint8_t g, uint8_t b)
 {
     int slot = find_ws2812_slot(pin);
     if (slot < 0) {
@@ -343,6 +349,24 @@ static void real_ws2812_write(int pin, int count, uint8_t r, uint8_t g, uint8_t 
      * ~900us), aman blocking singkat di sini tanpa mengganggu timing
      * scan cycle secara signifikan. */
     rmt_tx_wait_all_done(s_ws2812_pins[slot].channel, 100);
+}
+
+static void real_ws2812_write(int pin, int count, uint8_t r, uint8_t g, uint8_t b)
+{
+    if (pin == s_ws2812_override_pin) {
+        return;
+    }
+    ws2812_write_impl(pin, count, r, g, b);
+}
+
+void fbd_hw_ws2812_set_override(int pin)
+{
+    s_ws2812_override_pin = pin;
+}
+
+void fbd_hw_ws2812_write_override(int pin, int count, uint8_t r, uint8_t g, uint8_t b)
+{
+    ws2812_write_impl(pin, count, r, g, b);
 }
 
 /* ---- Sensor jarak ultrasonik (HC-SR04 dkk, trig+echo) ----

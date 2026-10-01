@@ -81,6 +81,26 @@ logika seperti indikator sinyal lemah. Semua konfigurasi non-logika
 (WiFi STA, port HTTP Endpoint, Slave ID/Baud Modbus, upload firmware)
 punya tab tersendiri (menu ☰ di toolbar editor), terpisah dari canvas.
 
+### Mode WiFi & reset dengan tombol
+
+Mode WiFi dipilih di tab System > Network (berlaku setelah reboot):
+
+| Mode | Perilaku |
+|---|---|
+| **AP + STA** (default) | Hotspot perangkat dan koneksi ke jaringan sekaligus |
+| **AP saja** | Hanya hotspot `ESP32-WebLogic-XXXX` |
+| **STA saja** | Hanya koneksi ke jaringan (hanya bisa dibuka lewat IP jaringannya) |
+| **Auto** | Mulai STA saja; kalau STA tidak tersambung 15 detik, AP menyala sendiri |
+
+Kalau salah isi WiFi sampai perangkat tidak terjangkau: **tahan tombol BOOT
+(GPIO0) 5 detik**. LED WS2812 di GPIO48 memberi umpan balik: kuning kedip
+lambat setelah 1 detik (lepas = batal), merah kedip cepat di 5 detik.
+Config WiFi dihapus, lepas tombol, perangkat reboot dan kembali ke mode
+AP + STA sehingga AP tersedia untuk konfigurasi ulang. Program FBD, config
+Modbus dan HTTP Endpoint tidak ikut terhapus. Selama tombol ditahan, node
+`ws2812` di pin 48 (kalau ada di program Anda) ditahan sementara supaya
+kedipan tidak tertimpa.
+
 ### Live update tanpa reboot & persistence
 
 Program yang di-Save langsung aktif tanpa reboot (arsitektur
@@ -108,9 +128,10 @@ upload firmware yang salah.
   menyajikan editor dari SPIFFS dan endpoint API (`/api/program`,
   `/api/network`, `/api/ota`, dst). Berjalan di Core 0, tidak pernah
   saling blocking dengan scan task (dual-buffer graph swap).
-- **`components/wifi_mgr/`** — WiFi mode APSTA: Access Point
-  (`ESP32-WebLogic-XXXX`) selalu aktif untuk akses langsung, sekaligus
-  koneksi STA ke jaringan rumah/kantor (config tersimpan di NVS).
+- **`components/wifi_mgr/`** — WiFi dengan mode yang bisa dipilih
+  (AP / STA / AP+STA / Auto, tersimpan di NVS): Access Point
+  (`ESP32-WebLogic-XXXX`) untuk akses langsung dan/atau koneksi STA ke
+  jaringan rumah/kantor.
 - **`components/endpoint_mgr/`**, **`components/modbus_slave_mgr/`** —
   konfigurasi NVS untuk fitur HTTP Endpoint dan Modbus RTU Slave.
 

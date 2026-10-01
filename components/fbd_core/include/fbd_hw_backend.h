@@ -72,6 +72,13 @@ const fbd_hw_backend_t *fbd_hw_real_backend(void);
 void fbd_hw_set_backend(const fbd_hw_backend_t *backend);
 const fbd_hw_backend_t *fbd_hw_get_backend(void);
 
+/* Khusus backend real (hanya ada di firmware, bukan test host): "pinjam"
+ * pin WS2812 untuk umpan balik sistem. Selama override aktif untuk suatu
+ * pin, ws2812_write() dari graph ke pin itu diabaikan; firmware menulis
+ * lewat fbd_hw_ws2812_write_override(). pin = -1 mematikan override. */
+void fbd_hw_ws2812_set_override(int pin);
+void fbd_hw_ws2812_write_override(int pin, int count, uint8_t r, uint8_t g, uint8_t b);
+
 #ifdef __cplusplus
 }
 #endif

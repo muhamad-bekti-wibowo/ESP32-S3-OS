@@ -323,6 +323,7 @@ static esp_err_t network_get_handler(httpd_req_t *req)
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "ssid", ssid);
     cJSON_AddStringToObject(root, "hostname", hostname);
+    cJSON_AddStringToObject(root, "mode", wifi_mgr_mode_to_str(wifi_mgr_get_mode()));
     cJSON_AddBoolToObject(root, "connected", wifi_mgr_is_sta_connected());
     cJSON_AddNumberToObject(root, "rssi", wifi_mgr_get_sta_rssi());
     char ip[16];
@@ -370,15 +371,36 @@ static esp_err_t network_post_handler(httpd_req_t *req)
     const cJSON *ssid = cJSON_GetObjectItem(json, "ssid");
     const cJSON *password = cJSON_GetObjectItem(json, "password");
     const cJSON *hostname = cJSON_GetObjectItem(json, "hostname");
-    if (!cJSON_IsString(ssid) || strlen(ssid->valuestring) == 0) {
+    const cJSON *mode_item = cJSON_GetObjectItem(json, "mode");
+
+    wifi_mgr_mode_t mode = WIFI_MGR_MODE_APSTA;
+    bool has_mode = false;
+    if (mode_item) {
+        if (!cJSON_IsString(mode_item) || !wifi_mgr_mode_from_str(mode_item->valuestring, &mode)) {
+            cJSON_Delete(json);
+            return send_json_error(req, "mode tidak valid (ap/sta/apsta/auto)");
+        }
+        has_mode = true;
+    }
+
+    /* Mode "ap" tidak memakai STA, jadi ssid boleh kosong (config STA lama
+     * dibiarkan apa adanya). Mode lain tetap wajib ssid. */
+    bool ssid_given = cJSON_IsString(ssid) && strlen(ssid->valuestring) > 0;
+    if (!ssid_given && !(has_mode && mode == WIFI_MGR_MODE_AP)) {
         cJSON_Delete(json);
         return send_json_error(req, "ssid wajib diisi");
     }
 
-    bool ok = wifi_mgr_save_sta_config(
-        ssid->valuestring,
-        cJSON_IsString(password) ? password->valuestring : "",
-        cJSON_IsString(hostname) ? hostname->valuestring : NULL);
+    bool ok = true;
+    if (ssid_given) {
+        ok = wifi_mgr_save_sta_config(
+            ssid->valuestring,
+            cJSON_IsString(password) ? password->valuestring : NULL,
+            cJSON_IsString(hostname) ? hostname->valuestring : NULL);
+    }
+    if (ok && has_mode) {
+        ok = wifi_mgr_save_mode(mode);
+    }
     cJSON_Delete(json);
 
     if (!ok) {
