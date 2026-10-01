@@ -5,13 +5,14 @@
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "esp_log.h"
+#include "esp_random.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 
 #define AP_SSID "ESP32-WebLogic"
-#define AP_PASS "logic1234"
+#define AP_PASS_LEN 10
 #define AP_CHANNEL 1
 #define AP_MAX_CONN 4
 
@@ -27,6 +28,7 @@
 #define NVS_KEY_STA_SSID "sta_ssid"
 #define NVS_KEY_STA_PASS "sta_pass"
 #define NVS_KEY_HOSTNAME "hostname"
+#define NVS_KEY_AP_PASS "ap_pass"
 
 static const char *TAG = "wifi_mgr";
 static EventGroupHandle_t s_sta_event_group = NULL;
@@ -70,6 +72,44 @@ static void load_sta_config_from_nvs(void)
     ESP_LOGI(TAG, "Config WiFi STA dimuat dari NVS: SSID=%s", s_sta_ssid);
 }
 
+/* Password AP unik per perangkat: dibuat acak sekali (esp_fill_random,
+ * bukan turunan MAC - MAC/BSSID AP terlihat di udara oleh siapa pun, jadi
+ * password turunan MAC bisa ditebak) lalu disimpan di NVS supaya tetap
+ * sama setelah reboot. Dicetak di log serial saat boot. Alfabet 32
+ * karakter tanpa yang mudah tertukar (0/O, 1/I/l), 256 % 32 == 0 jadi
+ * tidak ada bias modulo. */
+static char s_ap_pass[AP_PASS_LEN + 1];
+
+static void load_or_create_ap_pass(void)
+{
+    static const char alphabet[] = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    nvs_handle_t handle = 0;
+    bool nvs_ok = (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle) == ESP_OK);
+    if (!nvs_ok) {
+        ESP_LOGE(TAG, "gagal buka NVS untuk password AP, pakai password sementara (tidak tersimpan)");
+    } else {
+        size_t len = sizeof(s_ap_pass);
+        if (nvs_get_str(handle, NVS_KEY_AP_PASS, s_ap_pass, &len) == ESP_OK && strlen(s_ap_pass) >= 8) {
+            nvs_close(handle);
+            return;
+        }
+    }
+
+    uint8_t rnd[AP_PASS_LEN];
+    esp_fill_random(rnd, sizeof(rnd));
+    for (int i = 0; i < AP_PASS_LEN; ++i) {
+        s_ap_pass[i] = alphabet[rnd[i] % 32];
+    }
+    s_ap_pass[AP_PASS_LEN] = '\0';
+
+    if (nvs_ok) {
+        nvs_set_str(handle, NVS_KEY_AP_PASS, s_ap_pass);
+        nvs_commit(handle);
+        nvs_close(handle);
+    }
+    ESP_LOGI(TAG, "Password AP baru dibuat untuk perangkat ini (boot pertama)");
+}
+
 static void nvs_init_once(void)
 {
     esp_err_t ret = nvs_flash_init();
@@ -83,6 +123,7 @@ static void nvs_init_once(void)
 void wifi_mgr_start_ap(void)
 {
     nvs_init_once();
+    load_or_create_ap_pass();
 
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -100,13 +141,13 @@ void wifi_mgr_start_ap(void)
         },
     };
     strncpy((char *)wifi_config.ap.ssid, AP_SSID, sizeof(wifi_config.ap.ssid));
-    strncpy((char *)wifi_config.ap.password, AP_PASS, sizeof(wifi_config.ap.password));
+    strncpy((char *)wifi_config.ap.password, s_ap_pass, sizeof(wifi_config.ap.password));
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    ESP_LOGI(TAG, "AP aktif: SSID=%s PASS=%s, buka http://192.168.4.1", AP_SSID, AP_PASS);
+    ESP_LOGI(TAG, "AP aktif: SSID=%s PASS=%s, buka http://192.168.4.1", AP_SSID, s_ap_pass);
 }
 
 static void sta_event_handler(void *arg, esp_event_base_t event_base,
@@ -131,6 +172,7 @@ static void sta_event_handler(void *arg, esp_event_base_t event_base,
 void wifi_mgr_start_apsta(void)
 {
     nvs_init_once();
+    load_or_create_ap_pass();
     load_sta_config_from_nvs();
     s_sta_event_group = xEventGroupCreate();
 
@@ -154,7 +196,7 @@ void wifi_mgr_start_apsta(void)
         },
     };
     strncpy((char *)ap_config.ap.ssid, AP_SSID, sizeof(ap_config.ap.ssid));
-    strncpy((char *)ap_config.ap.password, AP_PASS, sizeof(ap_config.ap.password));
+    strncpy((char *)ap_config.ap.password, s_ap_pass, sizeof(ap_config.ap.password));
 
     /* Password kosong -> jaringan open (fallback MIFON), password terisi
      * (dari NVS lewat tab System>Network) -> WPA2-PSK. */
@@ -171,7 +213,7 @@ void wifi_mgr_start_apsta(void)
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta_config));
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    ESP_LOGI(TAG, "AP aktif: SSID=%s PASS=%s, buka http://192.168.4.1", AP_SSID, AP_PASS);
+    ESP_LOGI(TAG, "AP aktif: SSID=%s PASS=%s, buka http://192.168.4.1", AP_SSID, s_ap_pass);
     ESP_LOGI(TAG, "Menyambungkan STA ke %s...", s_sta_ssid);
 
     /* Tunggu STA connect maksimal 10s supaya log IP sempat tercetak sebelum

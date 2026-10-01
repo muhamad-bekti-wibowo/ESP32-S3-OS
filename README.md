@@ -149,11 +149,15 @@ idf.py build
 idf.py -p <PORT> flash monitor
 ```
 
-Setelah boot, buka `http://192.168.4.1` (via AP `ESP32-WebLogic`,
-password `logic1234`) atau IP STA device (dicetak di log serial saat
-boot, kalau sudah dikonfigurasi ke WiFi rumah/kantor lewat tab
-System > Network). Susun node lewat palette di editor, sambungkan
-port, klik **Save** untuk kirim ke device.
+Setelah boot, buka `http://192.168.4.1` lewat AP `ESP32-WebLogic`.
+**Password AP unik per perangkat**: dibuat acak (10 karakter) saat boot
+pertama, disimpan di NVS, dan dicetak di log serial
+(`AP aktif: SSID=... PASS=...`) — buka serial monitor
+(`idf.py monitor`, 115200 baud) sekali untuk melihatnya. Tidak ada
+password default yang sama antar perangkat. Alternatifnya, pakai IP STA
+device (juga dicetak di log serial) kalau sudah dikonfigurasi ke WiFi
+rumah/kantor lewat tab System > Network. Susun node lewat palette di
+editor, sambungkan port, klik **Save** untuk kirim ke device.
 
 ## Tutorial pemakaian
 
