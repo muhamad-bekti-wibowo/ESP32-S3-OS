@@ -109,7 +109,7 @@ upload firmware yang salah.
   `/api/network`, `/api/ota`, dst). Berjalan di Core 0, tidak pernah
   saling blocking dengan scan task (dual-buffer graph swap).
 - **`components/wifi_mgr/`** — WiFi mode APSTA: Access Point
-  (`ESP32-WebLogic`) selalu aktif untuk akses langsung, sekaligus
+  (`ESP32-WebLogic-XXXX`) selalu aktif untuk akses langsung, sekaligus
   koneksi STA ke jaringan rumah/kantor (config tersimpan di NVS).
 - **`components/endpoint_mgr/`**, **`components/modbus_slave_mgr/`** —
   konfigurasi NVS untuk fitur HTTP Endpoint dan Modbus RTU Slave.
@@ -149,13 +149,11 @@ idf.py build
 idf.py -p <PORT> flash monitor
 ```
 
-Setelah boot, buka `http://192.168.4.1` lewat AP `ESP32-WebLogic`.
-**Password AP unik per perangkat**: dibuat acak (10 karakter) saat boot
-pertama, disimpan di NVS, dan dicetak di log serial
-(`AP aktif: SSID=... PASS=...`) — buka serial monitor
-(`idf.py monitor`, 115200 baud) sekali untuk melihatnya. Tidak ada
-password default yang sama antar perangkat. Alternatifnya, pakai IP STA
-device (juga dicetak di log serial) kalau sudah dikonfigurasi ke WiFi
+Setelah boot, sambungkan ke AP perangkat lalu buka `http://192.168.4.1`.
+SSID AP **unik per perangkat**: `ESP32-WebLogic-XXXX` (XXXX = 2 byte
+terakhir MAC), jadi beberapa perangkat di ruangan yang sama mudah
+dibedakan. Password AP: `logic1234`. Alternatifnya, pakai IP STA device
+(dicetak di log serial saat boot) kalau sudah dikonfigurasi ke WiFi
 rumah/kantor lewat tab System > Network. Susun node lewat palette di
 editor, sambungkan port, klik **Save** untuk kirim ke device.
 
